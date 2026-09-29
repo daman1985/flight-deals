@@ -15,14 +15,18 @@ class SupabaseRestStore:
 
     def __init__(self, url: str, secret_key: str, *, timeout_seconds: float = 20) -> None:
         self._base_url = url.rstrip("/")
+        headers = {
+            "apikey": secret_key,
+            "Content-Type": "application/json",
+        }
+        if not secret_key.startswith("sb_secret_"):
+            # Legacy service-role keys are JWTs and still use Bearer auth. Modern
+            # secret keys are opaque and must be sent only through `apikey`.
+            headers["Authorization"] = f"Bearer {secret_key}"
         self._client = httpx.Client(
             base_url=f"{self._base_url}/rest/v1",
             timeout=timeout_seconds,
-            headers={
-                "apikey": secret_key,
-                "Authorization": f"Bearer {secret_key}",
-                "Content-Type": "application/json",
-            },
+            headers=headers,
         )
 
     def close(self) -> None:

@@ -14,6 +14,34 @@ from fare_worker.models import (
 from fare_worker.persistence import SupabaseRestStore
 
 
+def test_modern_secret_key_is_not_sent_as_a_bearer_token() -> None:
+    """Opaque `sb_secret_` keys belong only in Supabase's API-key header."""
+    store = SupabaseRestStore(
+        "https://example.supabase.co",
+        "sb_secret_example",
+    )
+    try:
+        assert store._client.headers["apikey"] == "sb_secret_example"
+        assert "authorization" not in store._client.headers
+    finally:
+        store.close()
+
+
+def test_legacy_service_role_key_keeps_bearer_compatibility() -> None:
+    """JWT-based service-role keys still require the legacy Bearer header."""
+    store = SupabaseRestStore(
+        "https://example.supabase.co",
+        "legacy-service-role-jwt",
+    )
+    try:
+        assert store._client.headers["apikey"] == "legacy-service-role-jwt"
+        assert store._client.headers["authorization"] == (
+            "Bearer legacy-service-role-jwt"
+        )
+    finally:
+        store.close()
+
+
 def test_failure_response_cannot_contain_fares() -> None:
     """The model rejects a failure that could otherwise look like a fare."""
     request = FareSearchRequest(
