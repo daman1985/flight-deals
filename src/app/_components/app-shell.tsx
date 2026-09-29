@@ -1,7 +1,11 @@
+/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 18: /bin/ps: Operation not permitted
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useState } from "react";
+
+import { createClient } from "@/lib/supabase/client";
 
 const navigation = [
   { href: "/", label: "Briefing" },
@@ -16,6 +20,27 @@ export function AppShell({
   isAuthenticated: boolean;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [isSigningOut, setIsSigningOut] = useState(false);
+
+  async function handleSignOut() {
+    setIsSigningOut(true);
+
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.signOut({ scope: "local" });
+
+      if (error) {
+        setIsSigningOut(false);
+        return;
+      }
+
+      router.replace("/login");
+      router.refresh();
+    } catch {
+      setIsSigningOut(false);
+    }
+  }
 
   return (
     <div className="app-shell">
@@ -59,11 +84,14 @@ export function AppShell({
             {isAuthenticated ? "Calibration mode" : "Secure session"}
           </p>
           {isAuthenticated ? (
-            <form action="/auth/signout" method="post">
-              <button className="signout-button" type="submit">
-                Sign out
-              </button>
-            </form>
+            <button
+              className="signout-button"
+              disabled={isSigningOut}
+              onClick={handleSignOut}
+              type="button"
+            >
+              {isSigningOut ? "Signing out…" : "Sign out"}
+            </button>
           ) : null}
         </div>
       </header>
