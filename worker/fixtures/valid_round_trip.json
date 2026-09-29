@@ -1,0 +1,35 @@
+[
+  {
+    "outbound": {
+      "legs": [
+        {
+          "airline": "AC",
+          "flight_number": "AC552",
+          "departure_airport": "YVR",
+          "arrival_airport": "SNA"
+        }
+      ],
+      "price": 982,
+      "currency": "CAD",
+      "duration": 178,
+      "stops": 0,
+      "primary_airline": "AC",
+      "booking_url": "https://www.google.com/travel/flights/example"
+    },
+    "return": {
+      "legs": [
+        {
+          "airline": "AC",
+          "flight_number": "AC561",
+          "departure_airport": "SNA",
+          "arrival_airport": "YVR"
+        }
+      ],
+      "price": null,
+      "currency": "CAD",
+      "duration": 185,
+      "stops": 0,
+      "primary_airline": "AC"
+    }
+  }
+]

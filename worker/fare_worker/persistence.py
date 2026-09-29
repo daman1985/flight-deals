@@ -1,0 +1,204 @@
+"""Narrow Supabase REST persistence used by the controlled proof."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any
+
+import httpx
+
+from .models import FareSearchRequest, FareSearchResponse, SearchStatus
+
+
+class SupabaseRestStore:
+    """Persist worker-owned rows with a server-only Supabase secret key."""
+
+    def __init__(self, url: str, secret_key: str, *, timeout_seconds: float = 20) -> None:
+        self._base_url = url.rstrip("/")
+        self._client = httpx.Client(
+            base_url=f"{self._base_url}/rest/v1",
+            timeout=timeout_seconds,
+            headers={
+                "apikey": secret_key,
+                "Authorization": f"Bearer {secret_key}",
+                "Content-Type": "application/json",
+            },
+        )
+
+    def close(self) -> None:
+        """Close the underlying HTTP connection pool."""
+        self._client.close()
+
+    def ensure_exact_test_watch(
+        self,
+        *,
+        watch_id: str,
+        user_id: str,
+        departure_date: str,
+        return_date: str,
+    ) -> None:
+        """Upsert the dedicated YVR → SNA development watch."""
+        payload = {
+            "id": watch_id,
+            "user_id": user_id,
+            "name": "Milestone 1 — YVR to SNA",
+            "origin_airports": ["YVR"],
+            "destination_airports": ["SNA"],
+            "date_mode": "EXACT",
+            "exact_departure_date": departure_date,
+            "exact_return_date": return_date,
+            "cabins": ["ECONOMY", "PREMIUM_ECONOMY", "BUSINESS"],
+            "passengers": 1,
+            "max_stops": 1,
+            "active": True,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self._request(
+            "POST",
+            "/watches",
+            params={"on_conflict": "id"},
+            headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
+            json=payload,
+        )
+
+    def upsert_candidate(self, watch_id: str, request: FareSearchRequest) -> str:
+        """Create or reuse the exact search candidate for one cabin."""
+        payload = {
+            "watch_id": watch_id,
+            "origin": request.origin,
+            "destination": request.destination,
+            "departure_date": request.departure_date.isoformat(),
+            "return_date": request.return_date.isoformat() if request.return_date else None,
+            "cabin": request.cabin.value,
+            "priority": 100,
+            "active": True,
+        }
+        rows = self._request(
+            "POST",
+            "/search_candidates",
+            params={
+                "on_conflict": (
+                    "watch_id,origin,destination,departure_date,return_date,cabin"
+                )
+            },
+            headers={"Prefer": "resolution=merge-duplicates,return=representation"},
+            json=payload,
+        )
+        return str(rows[0]["id"])
+
+    def persist_response(
+        self,
+        *,
+        watch_id: str,
+        candidate_id: str,
+        response: FareSearchResponse,
+        started_at: datetime,
+    ) -> str:
+        """Store health for every attempt and fares only for valid responses."""
+        health = response.health
+        finished_at = datetime.now(timezone.utc)
+        run_payload = {
+            "watch_id": watch_id,
+            "candidate_id": candidate_id,
+            "provider": "fli",
+            "started_at": started_at.isoformat(),
+            "finished_at": finished_at.isoformat(),
+            "status": health.status.value,
+            "result_count": health.result_count,
+            "completeness_score": health.completeness,
+            "retry_count": health.retries,
+            "error_code": health.provider_error_code,
+            "error_message": health.provider_error_message,
+            "latency_ms": health.latency_ms,
+        }
+        runs = self._request(
+            "POST",
+            "/search_runs",
+            headers={"Prefer": "return=representation"},
+            json=run_payload,
+        )
+        run_id = str(runs[0]["id"])
+
+        if health.status is SearchStatus.VALID_RESULT:
+            quality_eligible = health.completeness == 1
+            observations = [
+                {
+                    "watch_id": watch_id,
+                    "search_run_id": run_id,
+                    "provider": offer.provider,
+                    "origin": offer.origin,
+                    "destination": offer.destination,
+                    "departure_date": offer.departure_date.isoformat(),
+                    "return_date": offer.return_date.isoformat() if offer.return_date else None,
+                    "cabin": offer.cabin.value,
+                    "airline": offer.airline,
+                    "flight_numbers": offer.flight_numbers,
+                    "stops_outbound": offer.stops_outbound,
+                    "stops_return": offer.stops_return,
+                    "duration_outbound_minutes": offer.duration_outbound_minutes,
+                    "duration_return_minutes": offer.duration_return_minutes,
+                    "total_price": offer.total_price,
+                    "currency": offer.currency,
+                    "booking_url": offer.booking_url,
+                    "observed_at": offer.observed_at.isoformat(),
+                    "confirmed": False,
+                    "quality_eligible": quality_eligible,
+                    "raw_payload_json": offer.raw_payload or {},
+                }
+                for offer in response.offers
+            ]
+            self._request(
+                "POST",
+                "/fare_observations",
+                headers={"Prefer": "return=minimal"},
+                json=observations,
+            )
+
+        self._request(
+            "PATCH",
+            "/search_candidates",
+            params={"id": f"eq.{candidate_id}"},
+            headers={"Prefer": "return=minimal"},
+            json={
+                "last_scanned_at": finished_at.isoformat(),
+                "scan_count": _increment_scan_count_unavailable_marker(),
+            },
+            allow_scan_count_marker=True,
+        )
+        return run_id
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
+        json: Any = None,
+        allow_scan_count_marker: bool = False,
+    ) -> Any:
+        if allow_scan_count_marker and isinstance(json, dict):
+            # PostgREST cannot atomically increment with a JSON PATCH. Fetch the
+            # current count first; this controlled proof has exactly one writer.
+            current = self._request(
+                "GET",
+                path,
+                params={"id": params["id"], "select": "scan_count"},
+            )
+            json = {**json, "scan_count": int(current[0]["scan_count"]) + 1}
+        response = self._client.request(
+            method,
+            path.lstrip("/"),
+            params=params,
+            headers=headers,
+            json=json,
+        )
+        response.raise_for_status()
+        if not response.content:
+            return None
+        return response.json()
+
+
+def _increment_scan_count_unavailable_marker() -> int:
+    """Return a placeholder replaced by `_request` after reading current state."""
+    return 0

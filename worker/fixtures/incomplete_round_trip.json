@@ -1,0 +1,25 @@
+[
+  {
+    "outbound": {
+      "legs": [
+        {
+          "airline": "AC",
+          "flight_number": "AC552",
+          "departure_airport": "YVR",
+          "arrival_airport": "SNA"
+        }
+      ],
+      "price": null,
+      "currency": "CAD",
+      "duration": 178,
+      "stops": 0
+    },
+    "return": {
+      "legs": [],
+      "price": null,
+      "currency": "CAD",
+      "duration": 0,
+      "stops": 0
+    }
+  }
+]
