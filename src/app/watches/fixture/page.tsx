@@ -9,33 +9,49 @@ export const metadata: Metadata = { title: "YVR to SNA fixture" };
 export default function FixtureWatchPage() {
   return (
     <div className="page-frame detail-page">
-      <nav className="breadcrumb" aria-label="Breadcrumb">
-        <Link href="/watches">Watches</Link>
-        <span aria-hidden="true">/</span>
-        <span>YVR → SNA</span>
-      </nav>
       <header className="watch-hero">
-        <div>
-          <p className="fixture-label">Fixture data · not a live fare</p>
-          <p className="eyebrow">Exact-date development watch</p>
-          <h1>YVR <span aria-hidden="true">→</span> SNA</h1>
-          <p className="watch-dates">Nov 12–16, 2026 · 4 nights · Economy / PE / Business</p>
+        <div className="watch-topline">
+          <nav className="breadcrumb" aria-label="Breadcrumb">
+            <Link href="/watches">Watches</Link>
+            <span aria-hidden="true">/</span>
+            <span>Dossier 001</span>
+          </nav>
+          <p className="fixture-label">Fixture data / not a live fare</p>
         </div>
-        <div className="trust-block" aria-label="Fixture trust status">
-          <strong>Not connected</strong>
-          <span>Illustrative values only</span>
+        <div className="route-lockup">
+          <div>
+            <p className="folio">Exact-date watch / 4 nights</p>
+            <h1><span>YVR</span><i aria-hidden="true">→</i><span>SNA</span></h1>
+            <p className="route-names">Vancouver <span aria-hidden="true">—</span> Orange County</p>
+          </div>
+          <dl className="route-facts">
+            <div><dt>Outbound</dt><dd>12 Nov 2026</dd></div>
+            <div><dt>Return</dt><dd>16 Nov 2026</dd></div>
+            <div><dt>Cabins</dt><dd>Y / W / J</dd></div>
+            <div><dt>Currency</dt><dd>CAD</dd></div>
+          </dl>
+          <div className="trust-block" aria-label="Fixture trust status">
+            <span className="system-dot" aria-hidden="true" />
+            <strong>Not connected</strong>
+            <small>Illustrative values only</small>
+          </div>
         </div>
       </header>
 
-      <section className="state-sentence" aria-labelledby="state-heading">
-        <p className="eyebrow">Example relationship</p>
-        <h2 id="state-heading">
-          Premium Economy is only <span>$68 more</span> than Economy in this fixture.
-        </h2>
-        <p>
-          The comparison is intentionally scoped to the same route, dates, and stop
-          constraint. Live evidence has not been collected yet.
-        </p>
+      <section className="signal-brief" aria-labelledby="state-heading">
+        <div className="signal-story">
+          <p className="eyebrow">Example relationship / 01</p>
+          <h2 id="state-heading">Premium Economy is only <em>$68 more</em> than Economy.</h2>
+          <p>
+            Same route, dates, and stop constraint. The relationship is the story;
+            these particular fares are fixture values, not collected evidence.
+          </p>
+        </div>
+        <div className="signal-metric">
+          <span>Fixture premium</span>
+          <strong>+7.4%</strong>
+          <small>Illustrative median +48%</small>
+        </div>
       </section>
 
       <CabinLadder />
@@ -43,10 +59,10 @@ export default function FixtureWatchPage() {
       <section className="data-section" aria-labelledby="spread-heading">
         <div className="section-heading-row">
           <div>
-            <p className="eyebrow">Premium spread</p>
-            <h2 id="spread-heading">Today’s fixture sits well below the typical band.</h2>
+            <p className="eyebrow">Premium spread / 03</p>
+            <h2 id="spread-heading">The fixture sits well below its reference band.</h2>
           </div>
-          <p className="section-scope">Illustrative band · no historical sample</p>
+          <p className="section-scope">Illustrative range / no historical sample</p>
         </div>
         <SpreadStrip
           current={7.4}
@@ -59,7 +75,7 @@ export default function FixtureWatchPage() {
 
       <section className="scan-health" aria-labelledby="health-heading">
         <div>
-          <p className="eyebrow">Search health</p>
+          <p className="eyebrow">Search health / 04</p>
           <h2 id="health-heading">Waiting for the controlled acquisition proof.</h2>
         </div>
         <dl>

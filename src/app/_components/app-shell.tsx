@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const navigation = [
-  { href: "/", label: "Deal Feed" },
+  { href: "/", label: "Briefing" },
   { href: "/watches", label: "Watches" },
 ] as const;
 
@@ -13,14 +13,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar" aria-label="Primary navigation">
-        <Link className="wordmark" href="/" aria-label="Flight Deals home">
-          <span className="wordmark-mark" aria-hidden="true">
-            FD
+      <header className="site-header">
+        <Link className="wordmark" href="/" aria-label="Fare Radar home">
+          <span className="wordmark-mark" aria-hidden="true">FR</span>
+          <span className="wordmark-copy">
+            <strong>Fare Radar</strong>
+            <small>Cross-cabin intelligence</small>
           </span>
-          <span>Flight Deals</span>
         </Link>
-        <nav className="nav-list">
+        <nav className="nav-list" aria-label="Primary navigation">
           {navigation.map((item) => {
             const active =
               item.href === "/"
@@ -34,20 +35,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 key={item.href}
                 aria-current={active ? "page" : undefined}
               >
-                <span className="nav-rule" aria-hidden="true" />
+                <span className="nav-index" aria-hidden="true">
+                  0{navigation.indexOf(item) + 1}
+                </span>
                 {item.label}
               </Link>
             );
           })}
         </nav>
-        <p className="sidebar-note">
-          Private preview
-          <span>Milestone 0 foundation</span>
+        <p className="system-note">
+          <span className="system-dot" aria-hidden="true" />
+          Calibration mode
         </p>
-      </aside>
+      </header>
+      <div className="radar-tape" aria-hidden="true">
+        <span>RELATIVE VALUE</span>
+        <span>CABIN SPREAD</span>
+        <span>SEARCH HEALTH</span>
+        <span>EVIDENCE FIRST</span>
+      </div>
       <main className="main-content" id="main-content">
         {children}
       </main>
+      <footer className="site-footer">
+        <span>Private preview / foundation</span>
+        <span>Fares are evidence. Relationships are signal.</span>
+      </footer>
     </div>
   );
 }

@@ -19,8 +19,8 @@ const serif = Newsreader({
 
 export const metadata: Metadata = {
   title: {
-    default: "Flight Deals",
-    template: "%s · Flight Deals",
+    default: "Fare Radar",
+    template: "%s · Fare Radar",
   },
   description: "Private cross-cabin airfare relationship monitoring.",
 };

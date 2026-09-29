@@ -1,6 +1,7 @@
 const cabinRows = [
-  { cabin: "Economy", price: "$914", delta: null },
+  { code: "Y", cabin: "Economy", price: "$914", delta: null },
   {
+    code: "W",
     cabin: "Premium Economy",
     price: "$982",
     delta: "+$68 · +7.4%",
@@ -8,6 +9,7 @@ const cabinRows = [
     unusual: true,
   },
   {
+    code: "J",
     cabin: "Business",
     price: "$2,940",
     delta: "+$1,958 · ×3.0",
@@ -20,12 +22,12 @@ export function CabinLadder() {
     <section className="data-section" aria-labelledby="cabin-ladder-heading">
       <div className="section-heading-row">
         <div>
-          <p className="eyebrow">Cabin ladder</p>
+          <p className="eyebrow">Cabin ladder / 02</p>
           <h2 id="cabin-ladder-heading">The premium step is unusually small.</h2>
         </div>
         <p className="section-scope">Fixture prices · CAD · round trip</p>
       </div>
-      <ol className="cabin-ladder">
+      <ol className="cabin-ladder" aria-label="Fixture fares by cabin">
         {cabinRows.map((row) => (
           <li key={row.cabin}>
             {row.delta ? (
@@ -41,7 +43,8 @@ export function CabinLadder() {
               </p>
             ) : null}
             <div className="cabin-row">
-              <span>{row.cabin}</span>
+              <span className="ladder-code" aria-hidden="true">{row.code}</span>
+              <span className="ladder-name">{row.cabin}</span>
               <strong>{row.price}</strong>
             </div>
           </li>
