@@ -16,6 +16,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest==9.1.1"]
 
+[project.scripts]
+fare-worker-proof = "fare_worker.controlled_flow:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["fare_worker"]
 

@@ -51,7 +51,7 @@ For the Python worker:
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install -e './worker[dev]'
+python -m pip install './worker[dev]'
 python -m pytest worker/tests
 ```
 
