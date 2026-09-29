@@ -4,7 +4,7 @@ A private airfare monitor for detecting unusual relationships between Economy, P
 
 ## Current scope
 
-This repository covers Milestone 0 and the minimum technical foundation for Milestone 1:
+This repository covers Milestone 0 through the deterministic Milestone 2 detector:
 
 - Next.js application foundation
 - provider-neutral fare/search contracts
@@ -14,6 +14,7 @@ This repository covers Milestone 0 and the minimum technical foundation for Mile
 - deterministic spread calculations
 - fixture-based tests with no live Google dependency
 - a controlled YVR → SNA cross-cabin proof script
+- deterministic cabin-inversion and near-inversion detection
 
 Historical anomaly modeling, broad date scanning, alerts, booking, AI features, and additional providers are out of scope.
 

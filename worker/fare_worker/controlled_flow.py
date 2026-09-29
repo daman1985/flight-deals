@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from datetime import date, datetime, timezone
 
+from .detector_flow import analyze_watch
 from .models import Cabin, FareSearchRequest
 from .persistence import SupabaseRestStore
 from .providers import FliProvider
@@ -62,6 +63,12 @@ def main() -> None:
                 f"completeness={response.health.completeness:.2f}; "
                 f"latency_ms={response.health.latency_ms}; run={run_id}"
             )
+
+        comparisons, detected, resolved = analyze_watch(store, watch_id)
+        print(
+            f"detector: comparisons={comparisons}; "
+            f"detected={detected}; resolved={resolved}"
+        )
     finally:
         store.close()
 

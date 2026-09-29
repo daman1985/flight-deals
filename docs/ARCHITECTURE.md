@@ -30,6 +30,20 @@ Python worker
 
 The Next.js/domain layer never imports `fli`. Provider-specific structures are converted inside `worker/fare_worker/providers/fli_adapter.py`.
 
+## Day-one spread detection
+
+The worker evaluates only the latest quality-eligible observation batch for each
+route, date pair, cabin, and currency. Comparisons require matching outbound and
+return stop buckets and respect the watch's optional duration cap. Missing cabins,
+incomplete results, and provider failures produce no comparison and cannot resolve
+an existing anomaly.
+
+The detector implements configurable Economy → Premium Economy near-inversions
+and Premium Economy → Business value spreads. Strict inversions are high severity;
+threshold matches are medium severity until the later reconfirmation milestone.
+Stable UUIDv5 comparison IDs make anomaly persistence idempotent through the
+existing primary key without adding a race-prone read-before-insert flow.
+
 ## Search outcomes
 
 Every provider call produces exactly one health outcome:

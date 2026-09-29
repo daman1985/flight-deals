@@ -1,17 +1,41 @@
 """Persistence invariants for keeping health separate from fares."""
 
+import json
 from datetime import date, datetime, timezone
 
 import httpx
 
+from fare_worker.detector import DetectionThresholds, evaluate_cabin_spreads
 from fare_worker.models import (
     Cabin,
+    FareOffer,
     FareSearchRequest,
     FareSearchResponse,
     SearchHealth,
     SearchStatus,
 )
 from fare_worker.persistence import SupabaseRestStore
+
+WATCH_ID = "00000000-0000-4000-8000-000000000001"
+
+
+def _detector_offer(cabin: Cabin, price: float) -> FareOffer:
+    return FareOffer(
+        provider="fixture",
+        origin="YVR",
+        destination="SNA",
+        departure_date=date(2026, 11, 12),
+        return_date=date(2026, 11, 16),
+        cabin=cabin,
+        total_price=price,
+        currency="CAD",
+        flight_numbers=[f"FX-{cabin.value}"],
+        stops_outbound=0,
+        stops_return=0,
+        duration_outbound_minutes=180,
+        duration_return_minutes=180,
+        observed_at=datetime(2026, 9, 29, tzinfo=timezone.utc),
+    )
 
 
 def test_modern_secret_key_is_not_sent_as_a_bearer_token() -> None:
@@ -95,3 +119,129 @@ def test_rest_paths_stay_under_postgrest_base_url() -> None:
         store.close()
 
     assert observed_paths == ["/rest/v1/watches"]
+
+
+def test_anomaly_persistence_uses_idempotent_primary_key_upsert() -> None:
+    comparison = evaluate_cabin_spreads(
+        WATCH_ID,
+        [
+            _detector_offer(Cabin.ECONOMY, 1000),
+            _detector_offer(Cabin.PREMIUM_ECONOMY, 1100),
+        ],
+        DetectionThresholds(pe_near_inversion_pct=15),
+    )[0]
+    observed_requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_requests.append(request)
+        payload = json.loads(request.content)
+        return httpx.Response(200, json=[{"id": payload[0]["id"]}])
+
+    store = SupabaseRestStore("https://example.supabase.co", "test-secret")
+    store._client.close()
+    store._client = httpx.Client(
+        base_url="https://example.supabase.co/rest/v1/",
+        transport=httpx.MockTransport(handler),
+    )
+
+    try:
+        persisted, resolved = store.persist_comparison_results(
+            WATCH_ID,
+            [comparison],
+        )
+    finally:
+        store.close()
+
+    assert (persisted, resolved) == (1, 0)
+    assert observed_requests[0].method == "POST"
+    assert observed_requests[0].url.path == "/rest/v1/anomalies"
+    assert observed_requests[0].url.params["on_conflict"] == "id"
+
+
+def test_complete_non_anomalous_pair_resolves_existing_signal() -> None:
+    comparison = evaluate_cabin_spreads(
+        WATCH_ID,
+        [
+            _detector_offer(Cabin.ECONOMY, 800),
+            _detector_offer(Cabin.PREMIUM_ECONOMY, 1000),
+        ],
+        DetectionThresholds(pe_near_inversion_pct=15),
+    )[0]
+    observed_requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_requests.append(request)
+        return httpx.Response(200, json=[{"id": comparison.anomaly_id}])
+
+    store = SupabaseRestStore("https://example.supabase.co", "test-secret")
+    store._client.close()
+    store._client = httpx.Client(
+        base_url="https://example.supabase.co/rest/v1/",
+        transport=httpx.MockTransport(handler),
+    )
+
+    try:
+        persisted, resolved = store.persist_comparison_results(
+            WATCH_ID,
+            [comparison],
+        )
+    finally:
+        store.close()
+
+    assert (persisted, resolved) == (0, 1)
+    assert observed_requests[0].method == "PATCH"
+    assert observed_requests[0].url.params["id"] == f"eq.{comparison.anomaly_id}"
+    assert observed_requests[0].url.params["resolved_at"] == "is.null"
+
+
+def test_detection_loader_does_not_reuse_an_older_valid_run() -> None:
+    observed_paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_paths.append(request.url.path)
+        if request.url.path.endswith("/watches"):
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "pe_near_inversion_pct": 15,
+                        "business_vs_pe_pct": 30,
+                        "max_duration_minutes": None,
+                    }
+                ],
+            )
+        if request.url.path.endswith("/search_runs"):
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": "00000000-0000-4000-8000-000000000011",
+                        "candidate_id": "00000000-0000-4000-8000-000000000021",
+                        "status": "NO_RESULT",
+                        "finished_at": "2026-09-29T20:00:00+00:00",
+                    },
+                    {
+                        "id": "00000000-0000-4000-8000-000000000012",
+                        "candidate_id": "00000000-0000-4000-8000-000000000021",
+                        "status": "VALID_RESULT",
+                        "finished_at": "2026-09-29T19:00:00+00:00",
+                    },
+                ],
+            )
+        raise AssertionError("Fare observations must not be loaded for a stale run")
+
+    store = SupabaseRestStore("https://example.supabase.co", "test-secret")
+    store._client.close()
+    store._client = httpx.Client(
+        base_url="https://example.supabase.co/rest/v1/",
+        transport=httpx.MockTransport(handler),
+    )
+
+    try:
+        thresholds, offers = store.load_detection_input(WATCH_ID)
+    finally:
+        store.close()
+
+    assert thresholds.pe_near_inversion_pct == 15
+    assert offers == []
+    assert observed_paths == ["/rest/v1/watches", "/rest/v1/search_runs"]
