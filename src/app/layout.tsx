@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Newsreader } from "next/font/google";
 
 import { AppShell } from "@/app/_components/app-shell";
+import { createClient } from "@/lib/supabase/server";
 
 import "./globals.css";
 
@@ -25,14 +26,17 @@ export const metadata: Metadata = {
   description: "Private cross-cabin airfare relationship monitoring.",
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const supabase = await createClient();
+  const { data } = await supabase.auth.getClaims();
+
   return (
     <html lang="en" className={`${sans.variable} ${serif.variable}`}>
       <body>
         <a className="skip-link" href="#main-content">
           Skip to content
         </a>
-        <AppShell>{children}</AppShell>
+        <AppShell isAuthenticated={Boolean(data?.claims)}>{children}</AppShell>
       </body>
     </html>
   );

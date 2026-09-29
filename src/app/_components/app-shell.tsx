@@ -8,7 +8,13 @@ const navigation = [
   { href: "/watches", label: "Watches" },
 ] as const;
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({
+  children,
+  isAuthenticated,
+}: {
+  children: React.ReactNode;
+  isAuthenticated: boolean;
+}) {
   const pathname = usePathname();
 
   return (
@@ -21,32 +27,45 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <small>Cross-cabin intelligence</small>
           </span>
         </Link>
-        <nav className="nav-list" aria-label="Primary navigation">
-          {navigation.map((item) => {
-            const active =
-              item.href === "/"
-                ? pathname === "/"
-                : pathname === item.href || pathname.startsWith(`${item.href}/`);
-            return (
-              <Link
-                className="nav-link"
-                data-active={active || undefined}
-                href={item.href}
-                key={item.href}
-                aria-current={active ? "page" : undefined}
-              >
-                <span className="nav-index" aria-hidden="true">
-                  0{navigation.indexOf(item) + 1}
-                </span>
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
-        <p className="system-note">
-          <span className="system-dot" aria-hidden="true" />
-          Calibration mode
-        </p>
+        {isAuthenticated ? (
+          <nav className="nav-list" aria-label="Primary navigation">
+            {navigation.map((item, index) => {
+              const active =
+                item.href === "/"
+                  ? pathname === "/"
+                  : pathname === item.href || pathname.startsWith(`${item.href}/`);
+              return (
+                <Link
+                  className="nav-link"
+                  data-active={active || undefined}
+                  href={item.href}
+                  key={item.href}
+                  aria-current={active ? "page" : undefined}
+                >
+                  <span className="nav-index" aria-hidden="true">
+                    0{index + 1}
+                  </span>
+                  {item.label}
+                </Link>
+              );
+            })}
+          </nav>
+        ) : (
+          <p className="access-note">Private access</p>
+        )}
+        <div className="system-actions">
+          <p className="system-note">
+            <span className="system-dot" aria-hidden="true" />
+            {isAuthenticated ? "Calibration mode" : "Secure session"}
+          </p>
+          {isAuthenticated ? (
+            <form action="/auth/signout" method="post">
+              <button className="signout-button" type="submit">
+                Sign out
+              </button>
+            </form>
+          ) : null}
+        </div>
       </header>
       <div className="radar-tape" aria-hidden="true">
         <span>RELATIVE VALUE</span>
