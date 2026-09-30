@@ -2,6 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { RelativeTime } from "@/app/_components/relative-time";
+import { calculateCabinSpread } from "@/domain/spread";
+import { evidenceFreshness, scanIsOverdue } from "@/domain/trust";
 import type { Database } from "@/lib/supabase/database.types";
 import { createClient } from "@/lib/supabase/server";
 
@@ -30,12 +33,14 @@ const cabinCodes: Record<string, string> = {
   FIRST: "F",
 };
 const statusLabels: Record<string, string> = {
-  VALID_RESULT: "Valid result",
-  NO_RESULT: "No result",
-  INCOMPLETE_RESULT: "Incomplete",
+  VALID_RESULT: "Fare found",
+  NO_RESULT: "No eligible fare",
+  INCOMPLETE_RESULT: "Incomplete result",
   PROVIDER_FAILURE: "Provider failure",
-  THROTTLED: "Throttled",
+  THROTTLED: "Provider throttled",
 };
+const successfulStatuses = new Set(["VALID_RESULT", "NO_RESULT"]);
+const failureStatuses = new Set(["INCOMPLETE_RESULT", "PROVIDER_FAILURE", "THROTTLED"]);
 const dateFormatter = new Intl.DateTimeFormat("en-CA", {
   day: "numeric",
   month: "short",
@@ -63,11 +68,12 @@ function formatDate(value: string | null) {
 function dateScope(watch: Watch) {
   if (watch.date_mode === "EXACT") {
     return {
-      folio: "Exact-date watch",
+      folio: "Exact dates",
       outbound: formatDate(watch.exact_departure_date),
       inbound: formatDate(watch.exact_return_date),
     };
   }
+
   if (watch.date_mode === "FLEXIBLE_WINDOW") {
     return {
       folio: `${watch.min_trip_nights}–${watch.max_trip_nights} night window`,
@@ -75,29 +81,29 @@ function dateScope(watch: Watch) {
       inbound: formatDate(watch.window_departure_end),
     };
   }
+
   return {
     folio: `${watch.rolling_horizon_days}-day rolling watch`,
-    outbound: "Tomorrow",
+    outbound: "Rolling departures",
     inbound: `${watch.min_trip_nights}–${watch.max_trip_nights} nights`,
   };
 }
 
-function freshness(value: string | null) {
-  if (!value) return "Awaiting first scan";
-  const minutes = Math.max(0, Math.round((Date.now() - Date.parse(value)) / 60_000));
-  if (minutes < 2) return "Updated just now";
-  if (minutes < 60) return `Updated ${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 48) return `Updated ${hours} hr ago`;
-  return `Updated ${Math.round(hours / 24)} days ago`;
-}
+function latestCycleByCandidate(runs: SearchRun[]) {
+  const latest = runs[0];
+  const cycle = new Map<string, SearchRun>();
+  if (!latest) return cycle;
 
-function latestByCandidate(runs: SearchRun[]) {
-  const latest = new Map<string, SearchRun>();
+  const latestFinishedAt = Date.parse(latest.finished_at);
+  const cycleWindowMs = 10 * 60_000;
+
   for (const run of runs) {
-    if (!latest.has(run.candidate_id)) latest.set(run.candidate_id, run);
+    const ageFromLatest = latestFinishedAt - Date.parse(run.finished_at);
+    if (ageFromLatest > cycleWindowMs) break;
+    if (!cycle.has(run.candidate_id)) cycle.set(run.candidate_id, run);
   }
-  return latest;
+
+  return cycle;
 }
 
 function lowestByCabin(observations: Observation[], currentRunIds: Set<string>) {
@@ -112,30 +118,120 @@ function lowestByCabin(observations: Observation[], currentRunIds: Set<string>) 
   return lowest;
 }
 
-function signalCopy(anomaly: Anomaly | undefined, latestScan: string | null) {
+function stopsCopy(stops: number | null) {
+  if (stops === 0) return "Nonstop outbound";
+  if (stops === 1) return "1 outbound stop";
+  if (typeof stops === "number") return `${stops} outbound stops`;
+  return "Stops not reported";
+}
+
+function relationshipToEconomy(
+  cabin: string,
+  fare: Observation | undefined,
+  economyFare: Observation | undefined,
+) {
+  if (cabin === "ECONOMY") return "Reference fare for cabin comparisons";
+  if (!fare) return "No comparable fare returned";
+  if (!economyFare) return "Economy reference unavailable";
+
+  const spread = calculateCabinSpread(economyFare.total_price, fare.total_price);
+  const amount = currencyFormatter.format(Math.abs(spread.amount));
+  const direction = spread.amount < 0 ? "less" : "more";
+  const signedPercent = `${spread.percent > 0 ? "+" : ""}${spread.percent.toFixed(1)}%`;
+  return `${amount} ${direction} than Economy · ${signedPercent}`;
+}
+
+function signalSummary({
+  anomaly,
+  dataReadFailed,
+  fareCount,
+  freshnessState,
+  missingCabins,
+  overdue,
+  scanComplete,
+}: {
+  anomaly: Anomaly | undefined;
+  dataReadFailed: boolean;
+  fareCount: number;
+  freshnessState: "queued" | "live" | "aging" | "stale";
+  missingCabins: string[];
+  overdue: boolean;
+  scanComplete: boolean;
+}) {
+  if (dataReadFailed) {
+    return {
+      detail: "The watch is intact, but its latest search evidence could not be read. Try again before acting on a fare.",
+      label: "Needs attention",
+      metric: "Error",
+      title: "The latest evidence is temporarily unavailable.",
+      tone: "failure",
+    };
+  }
+
+  if (freshnessState === "queued") {
+    return {
+      detail: "The route and cabin candidates are ready. Prices will appear after the first acquisition completes.",
+      label: "Monitoring state",
+      metric: "Queued",
+      title: "Waiting for the first scan.",
+      tone: "queued",
+    };
+  }
+
+  if (freshnessState === "stale" || overdue) {
+    return {
+      detail: overdue
+        ? "The next scheduled scan is overdue. Treat these fares as historical evidence until a new scan completes."
+        : "The latest check is more than three hours old. Treat these fares as historical evidence until a new scan completes.",
+      label: "Trust state",
+      metric: "Stale",
+      title: "Evidence may have changed.",
+      tone: "stale",
+    };
+  }
+
+  if (!scanComplete) {
+    return {
+      detail: "Not every planned cabin search completed in the latest cycle, so no complete relationship conclusion is shown.",
+      label: "Trust state",
+      metric: "Partial",
+      title: "The latest scan is incomplete.",
+      tone: "partial",
+    };
+  }
+
+  if (missingCabins.length > 0) {
+    const names = missingCabins.map((cabin) => cabinNames[cabin] ?? cabin).join(" and ");
+    return {
+      detail: `${fareCount} current ${fareCount === 1 ? "fare was" : "fares were"} found. Every requested cabin was checked, but missing fares remain missing and never become price increases.`,
+      label: "Fare availability",
+      metric: "Partial",
+      title: `${names} returned no eligible fare.`,
+      tone: "partial",
+    };
+  }
+
   if (anomaly) {
     const lower = anomaly.lower_cabin ? cabinNames[anomaly.lower_cabin] : "Lower cabin";
     const higher = anomaly.higher_cabin ? cabinNames[anomaly.higher_cabin] : "Higher cabin";
     return {
-      eyebrow: "Active relationship / 01",
+      detail: "The comparison uses the same route, dates, and quality-eligible acquisition cycle.",
+      label: anomaly.confirmed_at ? "Reconfirmed relationship" : "Relationship detected",
+      metric:
+        anomaly.spread_pct === null
+          ? "Signal"
+          : `${anomaly.spread_pct > 0 ? "+" : ""}${anomaly.spread_pct.toFixed(1)}%`,
       title: `${higher} is unusually close to ${lower}.`,
-      detail: "The comparison uses the same route, dates, and quality-eligible acquisition batch.",
-      metric: anomaly.spread_pct === null ? "Signal" : `${anomaly.spread_pct > 0 ? "+" : ""}${anomaly.spread_pct.toFixed(1)}%`,
+      tone: "signal",
     };
   }
-  if (latestScan) {
-    return {
-      eyebrow: "Monitoring state / 01",
-      title: "No cross-cabin anomaly in the latest complete evidence.",
-      detail: "The live fares below remain useful evidence. A missing cabin stays missing and never becomes a false price increase.",
-      metric: "Clear",
-    };
-  }
+
   return {
-    eyebrow: "Monitoring state / 01",
-    title: "This watch is queued for its first live acquisition.",
-    detail: "The planner can create the route-date-cabin candidates without exposing provider controls in the browser.",
-    metric: "Queued",
+    detail: "All requested cabins were checked against the current watch constraints. Historical baselines are still being gathered.",
+    label: "Monitoring state",
+    metric: "Quiet",
+    title: "No unusual cabin relationship was detected.",
+    tone: freshnessState === "aging" ? "aging" : "quiet",
   };
 }
 
@@ -151,112 +247,240 @@ export default async function LiveWatchPage({ params }: { params: Promise<{ id: 
   if (watchError || !watchData) notFound();
   const watch = watchData as Watch;
   const [candidateResult, runResult, observationResult, anomalyResult] = await Promise.all([
-    supabase.from("search_candidates").select("*").eq("watch_id", id).order("priority", { ascending: false }).order("departure_date", { ascending: true }).limit(200),
-    supabase.from("search_runs").select("*").eq("watch_id", id).order("finished_at", { ascending: false }).limit(400),
-    supabase.from("fare_observations").select("id,watch_id,search_run_id,provider,origin,destination,departure_date,return_date,cabin,airline,flight_numbers,stops_outbound,stops_return,duration_outbound_minutes,duration_return_minutes,total_price,currency,booking_url,observed_at,confirmed,quality_eligible").eq("watch_id", id).order("observed_at", { ascending: false }).limit(1000),
-    supabase.from("anomalies").select("*").eq("watch_id", id).is("resolved_at", null).order("first_detected_at", { ascending: false }).limit(1),
+    supabase
+      .from("search_candidates")
+      .select("*")
+      .eq("watch_id", id)
+      .eq("active", true)
+      .order("priority", { ascending: false })
+      .order("departure_date", { ascending: true })
+      .limit(200),
+    supabase
+      .from("search_runs")
+      .select("*")
+      .eq("watch_id", id)
+      .order("finished_at", { ascending: false })
+      .limit(400),
+    supabase
+      .from("fare_observations")
+      .select("id,watch_id,search_run_id,provider,origin,destination,departure_date,return_date,cabin,airline,flight_numbers,stops_outbound,stops_return,duration_outbound_minutes,duration_return_minutes,total_price,currency,booking_url,observed_at,confirmed,quality_eligible")
+      .eq("watch_id", id)
+      .order("observed_at", { ascending: false })
+      .limit(1000),
+    supabase
+      .from("anomalies")
+      .select("*")
+      .eq("watch_id", id)
+      .is("resolved_at", null)
+      .order("first_detected_at", { ascending: false })
+      .limit(1),
   ]);
 
   const candidates = (candidateResult.data ?? []) as Candidate[];
   const runs = (runResult.data ?? []) as SearchRun[];
   const observations = (observationResult.data ?? []) as Observation[];
   const anomalies = (anomalyResult.data ?? []) as Anomaly[];
-  const currentRuns = latestByCandidate(runs);
+  const candidateByCabin = new Map(candidates.map((candidate) => [candidate.cabin, candidate]));
+  const candidateById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+  const cycleRuns = latestCycleByCandidate(runs);
   const currentValidRunIds = new Set(
-    [...currentRuns.values()].filter((run) => run.status === "VALID_RESULT").map((run) => run.id),
+    [...cycleRuns.values()]
+      .filter((run) => run.status === "VALID_RESULT")
+      .map((run) => run.id),
   );
   const fares = lowestByCabin(observations, currentValidRunIds);
   const latestScan = runs[0]?.finished_at ?? null;
-  const signal = signalCopy(anomalies[0], latestScan);
+  const freshness = evidenceFreshness(latestScan);
   const scope = dateScope(watch);
-  const healthyCount = [...currentRuns.values()].filter((run) => run.status === "VALID_RESULT").length;
-  const nextScan = candidates.map((candidate) => candidate.next_scan_at).filter((value): value is string => Boolean(value)).sort()[0] ?? null;
+  const nextScan = candidates
+    .map((candidate) => candidate.next_scan_at)
+    .filter((value): value is string => Boolean(value))
+    .sort()[0] ?? null;
+  const checkedCount = cycleRuns.size;
+  const scanComplete = candidates.length > 0 && checkedCount / candidates.length >= 0.9;
+  const failedCount = [...cycleRuns.values()].filter((run) => failureStatuses.has(run.status)).length;
+  const missingCabins = watch.cabins.filter((cabin) => !fares.has(cabin));
+  const overdue = scanIsOverdue(nextScan);
+  const dataReadFailed = Boolean(
+    candidateResult.error || runResult.error || observationResult.error || anomalyResult.error,
+  );
+  const signal = signalSummary({
+    anomaly: anomalies[0],
+    dataReadFailed,
+    fareCount: fares.size,
+    freshnessState: freshness.state,
+    missingCabins,
+    overdue,
+    scanComplete,
+  });
+  const economyFare = fares.get("ECONOMY");
+  const statusLabel =
+    signal.tone === "signal"
+      ? "Active relationship"
+      : signal.tone === "stale"
+        ? "Stale evidence"
+        : signal.tone === "partial"
+          ? "Partial evidence"
+          : signal.tone === "failure"
+            ? "Evidence unavailable"
+            : freshness.state === "live"
+              ? "Current evidence"
+              : freshness.state === "aging"
+                ? "Aging evidence"
+                : "Awaiting evidence";
 
   return (
     <div className="page-frame detail-page live-detail-page">
       <header className="watch-hero">
         <div className="watch-topline">
           <nav className="breadcrumb" aria-label="Breadcrumb">
-            <Link href="/watches">Watches</Link><span aria-hidden="true">/</span><span>{watch.name}</span>
+            <Link href="/watches">Watches</Link>
+            <span aria-hidden="true">/</span>
+            <span>{watch.name}</span>
           </nav>
-          <p className="live-label">Live Supabase evidence</p>
+          <p className="evidence-label" data-state={signal.tone}>{statusLabel}</p>
         </div>
         <div className="route-lockup">
-          <div>
+          <div className="route-identity">
             <p className="folio">{scope.folio}</p>
-            <h1><span>{watch.origin_airports[0]}</span><i aria-hidden="true">→</i><span>{watch.destination_airports[0]}</span></h1>
-            <p className="route-names">{watch.name}{(watch.origin_airports.length > 1 || watch.destination_airports.length > 1) ? <span>+ additional airport pairs</span> : null}</p>
+            <h1>
+              <span>{watch.origin_airports[0]}</span>
+              <span className="route-arrow" aria-hidden="true">→</span>
+              <span className="sr-only"> to </span>
+              <span>{watch.destination_airports[0]}</span>
+            </h1>
+            <p className="route-names">
+              {watch.name}
+              {watch.origin_airports.length > 1 || watch.destination_airports.length > 1 ? (
+                <span>Additional airport pairs included</span>
+              ) : null}
+            </p>
           </div>
           <dl className="route-facts">
             <div><dt>Outbound</dt><dd>{scope.outbound}</dd></div>
             <div><dt>Return / scope</dt><dd>{scope.inbound}</dd></div>
-            <div><dt>Cabins</dt><dd>{watch.cabins.map((cabin) => cabinCodes[cabin]).join(" / ")}</dd></div>
-            <div><dt>Currency</dt><dd>CAD</dd></div>
+            <div><dt>Cabins</dt><dd>{watch.cabins.map((cabin) => cabinNames[cabin]).join(" · ")}</dd></div>
+            <div><dt>Currency</dt><dd>CAD round trip</dd></div>
           </dl>
-          <div className="trust-block" aria-label="Live data status">
-            <span className="system-dot system-dot-live" aria-hidden="true" />
-            <strong>{freshness(latestScan)}</strong>
-            <small>{latestScan ? timestampFormatter.format(new Date(latestScan)) : "No search run yet"}</small>
-          </div>
         </div>
       </header>
 
-      <section className="signal-brief" aria-labelledby="state-heading">
-        <div className="signal-story">
-          <p className="eyebrow">{signal.eyebrow}</p><h2 id="state-heading">{signal.title}</h2><p>{signal.detail}</p>
+      <section className="signal-summary" data-tone={signal.tone} aria-labelledby="state-heading">
+        <div className="signal-summary-copy">
+          <p className="eyebrow">{signal.label}</p>
+          <h2 id="state-heading">{signal.title}</h2>
+          <p>{signal.detail}</p>
         </div>
-        <div className="signal-metric">
-          <span>Current signal</span><strong>{signal.metric}</strong><small>{anomalies.length ? "Observed / awaiting reconfirmation" : "Deterministic comparison"}</small>
+        <div className="signal-summary-metric">
+          <span>Current conclusion</span>
+          <strong>{signal.metric}</strong>
         </div>
+        <dl className="trust-row" aria-label="Evidence trust summary">
+          <div>
+            <dt>Last checked</dt>
+            <dd>
+              {latestScan ? (
+                <RelativeTime
+                  initialLabel={freshness.label}
+                  initialState={freshness.state}
+                  timestamp={latestScan}
+                />
+              ) : freshness.label}
+            </dd>
+          </div>
+          <div><dt>Scan completion</dt><dd>{checkedCount} of {candidates.length || watch.cabins.length} cabins checked</dd></div>
+          <div><dt>Fare availability</dt><dd>{fares.size} of {watch.cabins.length} cabins found</dd></div>
+          <div><dt>Next scan</dt><dd>{overdue ? "Overdue" : nextScan ? timestampFormatter.format(new Date(nextScan)) : "Not scheduled"}</dd></div>
+        </dl>
       </section>
 
-      <section className="data-section" aria-labelledby="live-cabin-heading">
+      <section className="cabin-snapshot" aria-labelledby="live-cabin-heading">
         <div className="section-heading-row">
-          <div><p className="eyebrow">Cabin ledger / 02</p><h2 id="live-cabin-heading">Latest valid fare in each requested cabin.</h2></div>
-          <p className="section-scope">Live acquisition · CAD · lowest current offer</p>
+          <div>
+            <p className="eyebrow">Cabin comparison</p>
+            <h2 id="live-cabin-heading">Current fares and their relationship.</h2>
+          </div>
+          <p className="section-scope">Same route · same dates · CAD round trip</p>
         </div>
-        <ol className="cabin-ladder" aria-label="Live fares by cabin">
+        <ol className="cabin-overview" aria-label="Current fares by cabin">
           {cabinOrder.filter((cabin) => watch.cabins.includes(cabin)).map((cabin) => {
             const fare = fares.get(cabin);
-            const candidate = candidates.find((item) => item.cabin === cabin);
-            const run = candidate ? currentRuns.get(candidate.id) : undefined;
+            const candidate = candidateByCabin.get(cabin);
+            const run = candidate ? cycleRuns.get(candidate.id) : undefined;
             return (
               <li key={cabin}>
-                <div className="cabin-row">
+                <div className="cabin-overview-heading">
                   <span className="ladder-code" aria-hidden="true">{cabinCodes[cabin]}</span>
-                  <span className="ladder-name">{cabinNames[cabin]}<small>{run ? statusLabels[run.status] ?? run.status : "Awaiting scan"}</small></span>
-                  <strong>{fare ? currencyFormatter.format(fare.total_price) : "—"}</strong>
+                  <div>
+                    <h3>{cabinNames[cabin]}</h3>
+                    <p>{run ? statusLabels[run.status] ?? run.status : "Not checked this cycle"}</p>
+                  </div>
                 </div>
-                {fare ? <p className="fare-provenance">{fare.airline ?? "Airline not reported"} · {fare.stops_outbound ?? "?"} outbound stops · observed {timestampFormatter.format(new Date(fare.observed_at))}</p> : null}
+                <strong className="cabin-price">{fare ? currencyFormatter.format(fare.total_price) : "—"}</strong>
+                <p className="cabin-relationship">{relationshipToEconomy(cabin, fare, economyFare)}</p>
+                <p className="fare-provenance">
+                  {fare
+                    ? `${fare.airline ?? "Airline not reported"} · ${stopsCopy(fare.stops_outbound)} · observed ${timestampFormatter.format(new Date(fare.observed_at))}`
+                    : run?.status === "NO_RESULT"
+                      ? "The provider returned no fare that met this watch's constraints."
+                      : "No current, quality-eligible fare is available."}
+                </p>
               </li>
             );
           })}
         </ol>
+        <p className="baseline-note">
+          Historical relationship baseline is still being built. Current differences are shown without claiming they are unusual.
+        </p>
       </section>
 
       <section className="scan-health" aria-labelledby="health-heading">
-        <div><p className="eyebrow">Search health / 03</p><h2 id="health-heading">{runs.length ? "Provider health is tracked apart from fare movement." : "Ready for the first bounded worker rotation."}</h2></div>
+        <div>
+          <p className="eyebrow">Monitor health</p>
+          <h2 id="health-heading">What the latest cycle actually checked.</h2>
+        </div>
         <dl>
-          <div><dt>Provider</dt><dd>{runs[0]?.provider ?? "fli · queued"}</dd></div>
-          <div><dt>Current coverage</dt><dd>{healthyCount} of {candidates.length || watch.cabins.length} candidates valid</dd></div>
-          <div><dt>Next due scan</dt><dd>{nextScan ? timestampFormatter.format(new Date(nextScan)) : "Due now"}</dd></div>
+          <div><dt>Search completion</dt><dd>{checkedCount} of {candidates.length || watch.cabins.length}</dd></div>
+          <div><dt>Provider responses</dt><dd>{[...cycleRuns.values()].filter((run) => successfulStatuses.has(run.status)).length} successful · {failedCount} failed</dd></div>
+          <div><dt>Schedule</dt><dd>{overdue ? "Next scan overdue" : nextScan ? `Due ${timestampFormatter.format(new Date(nextScan))}` : "Not scheduled"}</dd></div>
         </dl>
       </section>
 
-      <section className="run-ledger" aria-labelledby="run-ledger-heading">
-        <div className="registry-rule"><h2 id="run-ledger-heading">Recent acquisition record</h2><span>No raw provider payloads exposed</span></div>
-        <div className="run-ledger-table" role="table" aria-label="Recent search runs">
-          {runs.slice(0, 8).map((run) => {
-            const candidate = candidates.find((item) => item.id === run.candidate_id);
-            return (
-              <div className="run-ledger-row" role="row" key={run.id}>
-                <span role="cell">{candidate ? cabinCodes[candidate.cabin] : "—"}</span><strong role="cell">{statusLabels[run.status] ?? run.status}</strong><span role="cell">{run.result_count} {run.result_count === 1 ? "offer" : "offers"}</span><span role="cell">{run.latency_ms === null ? "Latency unavailable" : `${(run.latency_ms / 1000).toFixed(1)}s`}</span><time role="cell" dateTime={run.finished_at}>{timestampFormatter.format(new Date(run.finished_at))}</time>
-              </div>
-            );
-          })}
+      <details className="scan-diagnostics">
+        <summary>
+          <span>Technical scan history</span>
+          <small>{Math.min(runs.length, 8)} recent {runs.length === 1 ? "run" : "runs"}</small>
+        </summary>
+        <div className="scan-table-wrap">
+          <table className="run-ledger-table">
+            <caption className="sr-only">Recent provider search runs</caption>
+            <thead>
+              <tr>
+                <th scope="col">Cabin</th>
+                <th scope="col">Result</th>
+                <th scope="col">Offers</th>
+                <th scope="col">Latency</th>
+                <th scope="col">Finished</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.slice(0, 8).map((run) => {
+                const candidate = candidateById.get(run.candidate_id);
+                return (
+                  <tr key={run.id}>
+                    <td>{candidate ? cabinNames[candidate.cabin] : "Unknown"}</td>
+                    <td>{statusLabels[run.status] ?? run.status}</td>
+                    <td>{run.result_count}</td>
+                    <td>{run.latency_ms === null ? "—" : `${(run.latency_ms / 1000).toFixed(1)}s`}</td>
+                    <td><time dateTime={run.finished_at}>{timestampFormatter.format(new Date(run.finished_at))}</time></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
           {runs.length === 0 ? <p className="ledger-empty">No search runs have been recorded yet.</p> : null}
         </div>
-      </section>
+      </details>
     </div>
   );
 }

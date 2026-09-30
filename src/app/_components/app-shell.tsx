@@ -80,7 +80,7 @@ export function AppShell({
         <div className="system-actions">
           <p className="system-note">
             <span className="system-dot" aria-hidden="true" />
-            {isAuthenticated ? "Calibration mode" : "Secure session"}
+            {isAuthenticated ? "Private workspace" : "Secure session"}
           </p>
           {isAuthenticated ? (
             <button
@@ -94,17 +94,11 @@ export function AppShell({
           ) : null}
         </div>
       </header>
-      <div className="radar-tape" aria-hidden="true">
-        <span>RELATIVE VALUE</span>
-        <span>CABIN SPREAD</span>
-        <span>SEARCH HEALTH</span>
-        <span>EVIDENCE FIRST</span>
-      </div>
       <main className="main-content" id="main-content">
         {children}
       </main>
       <footer className="site-footer">
-        <span>Private preview / foundation</span>
+        <span>Private fare monitor</span>
         <span>Fares are evidence. Relationships are signal.</span>
       </footer>
     </div>

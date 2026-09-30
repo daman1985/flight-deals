@@ -56,7 +56,12 @@ export const watchDraftSchema = z
     minTripNights: optionalInteger(1, 60, "Use a trip length from 1 to 60 nights."),
     maxTripNights: optionalInteger(1, 60, "Use a trip length from 1 to 60 nights."),
     rollingHorizonDays: optionalInteger(1, 365, "Use a horizon from 1 to 365 days."),
-    cabins: z.array(z.enum(CABINS)).min(1, "Choose at least one cabin."),
+    cabins: z
+      .array(z.enum(CABINS))
+      .min(2, "Choose Economy and at least one premium cabin.")
+      .refine((cabins) => cabins.includes("ECONOMY"), {
+        message: "Economy is required as the comparison reference.",
+      }),
     passengers: requiredNumber(1, 9, "Use 1 to 9 passengers.").int(
       "Passengers must be a whole number.",
     ),

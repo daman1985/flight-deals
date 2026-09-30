@@ -8,9 +8,9 @@ const initialState: WatchActionState = { message: "" };
 
 const dateModes = [
   {
-    value: "EXACT",
-    label: "Exact",
-    note: "One known round trip",
+    value: "ANYTIME",
+    label: "Anytime",
+    note: "Keep scanning forward",
   },
   {
     value: "FLEXIBLE_WINDOW",
@@ -18,9 +18,9 @@ const dateModes = [
     note: "Depart within a date range",
   },
   {
-    value: "ANYTIME",
-    label: "Anytime",
-    note: "Keep scanning forward",
+    value: "EXACT",
+    label: "Exact",
+    note: "One known round trip",
   },
 ] as const;
 
@@ -45,7 +45,7 @@ function FieldError({
 }
 
 export function WatchBuilder() {
-  const [dateMode, setDateMode] = useState<DateMode>("EXACT");
+  const [dateMode, setDateMode] = useState<DateMode>("ANYTIME");
   const [state, formAction, pending] = useActionState(createWatch, initialState);
 
   return (
@@ -71,7 +71,7 @@ export function WatchBuilder() {
               required
               type="text"
             />
-            <small id="name-note">A private label for this route dossier.</small>
+            <small id="name-note">A private label to help you recognize this watch.</small>
             <FieldError errors={state.errors} field="name" />
           </div>
           <div className="builder-field">
@@ -113,7 +113,7 @@ export function WatchBuilder() {
             <p className="eyebrow">Timing</p>
             <h2>When?</h2>
           </div>
-          <p>Anytime is a persistent horizon, not an empty date field.</p>
+          <p>Choose an ongoing horizon, a flexible departure window, or one exact trip.</p>
         </div>
         <div className="mode-selector">
           {dateModes.map((mode) => (
@@ -210,7 +210,7 @@ export function WatchBuilder() {
             <div className="builder-field">
               <label htmlFor="minTripNights">Minimum nights</label>
               <input
-                defaultValue="3"
+                defaultValue="4"
                 id="minTripNights"
                 max="60"
                 min="1"
@@ -223,7 +223,7 @@ export function WatchBuilder() {
             <div className="builder-field">
               <label htmlFor="maxTripNights">Maximum nights</label>
               <input
-                defaultValue="14"
+                defaultValue="10"
                 id="maxTripNights"
                 max="60"
                 min="1"
@@ -245,17 +245,24 @@ export function WatchBuilder() {
             <p className="eyebrow">Comparison set</p>
             <h2>Which cabins?</h2>
           </div>
-          <p>Each cabin stays distinct so unusual upgrade relationships remain visible.</p>
+          <p>Economy stays selected as the reference; choose the premium cabins to compare against it.</p>
         </div>
         <div className="cabin-selector">
           {cabins.map((cabin) => (
-            <label className="cabin-option" key={cabin.value}>
-              <input
-                defaultChecked={cabin.value !== "FIRST"}
-                name="cabins"
-                type="checkbox"
-                value={cabin.value}
-              />
+            <label className="cabin-option" data-locked={cabin.value === "ECONOMY" || undefined} key={cabin.value}>
+              {cabin.value === "ECONOMY" ? (
+                <>
+                  <input aria-label="Economy, required reference cabin" defaultChecked disabled type="checkbox" />
+                  <input name="cabins" type="hidden" value={cabin.value} />
+                </>
+              ) : (
+                <input
+                  defaultChecked={cabin.value !== "FIRST"}
+                  name="cabins"
+                  type="checkbox"
+                  value={cabin.value}
+                />
+              )}
               <span aria-hidden="true">{cabin.code}</span>
               <strong>{cabin.label}</strong>
             </label>
@@ -366,8 +373,8 @@ export function WatchBuilder() {
         <div>
           <p className="eyebrow">Ready to monitor</p>
           <p>
-            Saving creates the watch definition. Automated rotating coverage arrives in the
-            next milestone.
+            Saving creates the watch and its search candidates. Until unattended scheduling
+            is deployed, new scans run only when the worker is started.
           </p>
           <p className="builder-submit-error" aria-live="polite">
             {state.message || "\u00a0"}

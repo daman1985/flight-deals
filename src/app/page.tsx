@@ -18,15 +18,15 @@ export default async function DealFeedPage() {
     <div className="page-frame briefing-page">
       <header className="briefing-hero">
         <div className="briefing-copy">
-          <p className="folio">Private fare intelligence / Issue 00</p>
+          <p className="folio">Private cross-cabin monitoring</p>
           <p className="eyebrow">The daily briefing</p>
           <h1>The upgrade is sometimes the deal.</h1>
           <p className="hero-deck">
             Fare Radar watches the distance between cabins—not just the lowest
             number on the page—so a strangely small premium cannot hide in plain sight.
           </p>
-          <Link className="primary-link" href="/watches/fixture">
-            Read the sample dossier <span aria-hidden="true">↗</span>
+          <Link className="primary-link" href="/watches">
+            Open live watches <span aria-hidden="true">→</span>
           </Link>
         </div>
         <aside className="relationship-board" aria-label="Illustrative cabin relationship">
@@ -63,7 +63,7 @@ export default async function DealFeedPage() {
         <div><dt>Live watches</dt><dd>{String(liveWatchCount).padStart(2, "0")}</dd></div>
         <div><dt>Verified signals</dt><dd>00</dd></div>
         <div><dt>Provider state</dt><dd>Proven</dd></div>
-        <div><dt>Coverage</dt><dd>Manual</dd></div>
+        <div><dt>Scheduling</dt><dd>Pending</dd></div>
       </dl>
 
       <section className="quiet-feed" aria-labelledby="quiet-heading">
@@ -72,9 +72,9 @@ export default async function DealFeedPage() {
           <p className="eyebrow">Signal ledger</p>
           <h2 id="quiet-heading">Nothing has earned the front page yet.</h2>
           <p>
-            That is the honest state: acquisition works, but rotating coverage and alerting
-            are not automated yet. When evidence earns a signal, each entry will show the
-            route, cabin gap, comparison scope, freshness, and search health together.
+            That is the honest state: live acquisition works, while unattended scheduling
+            and alerts are still being connected. Every watch keeps freshness, missing fares,
+            and search health visible instead of implying certainty the data cannot support.
           </p>
         </div>
         <div className="reading-key" aria-label="How to read a future signal">

@@ -16,13 +16,12 @@ export default function NewWatchPage() {
         </p>
         <div className="builder-hero-grid">
           <div>
-            <p className="folio">Watch builder / New dossier</p>
-            <p className="eyebrow">Define the question</p>
-            <h1>What should the radar keep watching?</h1>
+            <p className="eyebrow">New watch</p>
+            <h1>What should we watch?</h1>
           </div>
           <p className="hero-deck">
-            Set the route once. Fare Radar will preserve cabin boundaries, date scope,
-            and itinerary quality so every later comparison means the same thing.
+            Define the route, timing, and cabin comparison once. You can refine optional
+            flight preferences after the essential monitoring question is clear.
           </p>
         </div>
       </header>

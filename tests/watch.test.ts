@@ -104,4 +104,25 @@ describe("watchDraftSchema", () => {
       );
     }
   });
+
+  it("requires Economy plus at least one premium cabin", () => {
+    const result = watchDraftSchema.safeParse({
+      ...baseDraft(),
+      cabins: ["BUSINESS"],
+      dateMode: "ANYTIME",
+      rollingHorizonDays: "180",
+      minTripNights: "4",
+      maxTripNights: "10",
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.message)).toEqual(
+        expect.arrayContaining([
+          "Choose Economy and at least one premium cabin.",
+          "Economy is required as the comparison reference.",
+        ]),
+      );
+    }
+  });
 });
