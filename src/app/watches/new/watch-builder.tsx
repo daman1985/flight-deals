@@ -2,9 +2,33 @@
 
 import { useActionState, useState } from "react";
 
-import { createWatch, type WatchActionState } from "@/app/watches/new/actions";
+import {
+  createWatch,
+  type WatchActionState,
+  type WatchFormValues,
+} from "@/app/watches/new/actions";
 
-const initialState: WatchActionState = { message: "" };
+const initialValues: WatchFormValues = {
+  name: "",
+  originAirports: "",
+  destinationAirports: "",
+  dateMode: "ANYTIME",
+  exactDepartureDate: "",
+  exactReturnDate: "",
+  windowDepartureStart: "",
+  windowDepartureEnd: "",
+  minTripNights: "4",
+  maxTripNights: "10",
+  rollingHorizonDays: "180",
+  cabins: ["ECONOMY", "PREMIUM_ECONOMY", "BUSINESS"],
+  passengers: "1",
+  maxStops: "1",
+  maxDurationHours: "",
+  peNearInversionPct: "15",
+  businessVsPePct: "30",
+};
+
+const initialState: WatchActionState = { attempt: 0, message: "" };
 
 const dateModes = [
   {
@@ -33,6 +57,10 @@ const cabins = [
 
 type DateMode = (typeof dateModes)[number]["value"];
 
+function asDateMode(value: string | undefined): DateMode {
+  return dateModes.some((mode) => mode.value === value) ? (value as DateMode) : "ANYTIME";
+}
+
 function FieldError({
   errors,
   field,
@@ -45,11 +73,12 @@ function FieldError({
 }
 
 export function WatchBuilder() {
-  const [dateMode, setDateMode] = useState<DateMode>("ANYTIME");
   const [state, formAction, pending] = useActionState(createWatch, initialState);
+  const [dateMode, setDateMode] = useState<DateMode>(() => asDateMode(state.values?.dateMode));
+  const values = state.values ?? initialValues;
 
   return (
-    <form action={formAction} className="watch-builder">
+    <form action={formAction} className="watch-builder" key={state.attempt}>
       <section className="builder-step" aria-labelledby="builder-where">
         <div className="builder-step-heading">
           <span aria-hidden="true">01</span>
@@ -70,6 +99,7 @@ export function WatchBuilder() {
               placeholder="West Coast winter escape"
               required
               type="text"
+              defaultValue={values.name}
             />
             <small id="name-note">A private label to help you recognize this watch.</small>
             <FieldError errors={state.errors} field="name" />
@@ -84,6 +114,7 @@ export function WatchBuilder() {
               required
               spellCheck={false}
               type="text"
+              defaultValue={values.originAirports}
             />
             <small>Separate alternatives with commas.</small>
             <FieldError errors={state.errors} field="originAirports" />
@@ -98,6 +129,7 @@ export function WatchBuilder() {
               required
               spellCheck={false}
               type="text"
+              defaultValue={values.destinationAirports}
             />
             <small>Three-letter IATA airport codes.</small>
             <FieldError errors={state.errors} field="destinationAirports" />
@@ -136,12 +168,24 @@ export function WatchBuilder() {
           <div className="builder-fields builder-fields-two mode-fields">
             <div className="builder-field">
               <label htmlFor="exactDepartureDate">Departure</label>
-              <input id="exactDepartureDate" name="exactDepartureDate" required type="date" />
+              <input
+                defaultValue={values.exactDepartureDate}
+                id="exactDepartureDate"
+                name="exactDepartureDate"
+                required
+                type="date"
+              />
               <FieldError errors={state.errors} field="exactDepartureDate" />
             </div>
             <div className="builder-field">
               <label htmlFor="exactReturnDate">Return</label>
-              <input id="exactReturnDate" name="exactReturnDate" required type="date" />
+              <input
+                defaultValue={values.exactReturnDate}
+                id="exactReturnDate"
+                name="exactReturnDate"
+                required
+                type="date"
+              />
               <FieldError errors={state.errors} field="exactReturnDate" />
             </div>
           </div>
@@ -156,6 +200,7 @@ export function WatchBuilder() {
                 name="windowDepartureStart"
                 required
                 type="date"
+                defaultValue={values.windowDepartureStart}
               />
               <FieldError errors={state.errors} field="windowDepartureStart" />
             </div>
@@ -166,6 +211,7 @@ export function WatchBuilder() {
                 name="windowDepartureEnd"
                 required
                 type="date"
+                defaultValue={values.windowDepartureEnd}
               />
               <FieldError errors={state.errors} field="windowDepartureEnd" />
             </div>
@@ -176,7 +222,7 @@ export function WatchBuilder() {
           <div className="builder-fields mode-fields">
             <div className="builder-field">
               <label htmlFor="rollingHorizonDays">Rolling horizon</label>
-              <select defaultValue="180" id="rollingHorizonDays" name="rollingHorizonDays">
+              <select defaultValue={values.rollingHorizonDays} id="rollingHorizonDays" name="rollingHorizonDays">
                 <option value="30">Next 30 days</option>
                 <option value="90">Next 90 days</option>
                 <option value="180">Next 180 days</option>
@@ -210,7 +256,7 @@ export function WatchBuilder() {
             <div className="builder-field">
               <label htmlFor="minTripNights">Minimum nights</label>
               <input
-                defaultValue="4"
+                defaultValue={values.minTripNights}
                 id="minTripNights"
                 max="60"
                 min="1"
@@ -223,7 +269,7 @@ export function WatchBuilder() {
             <div className="builder-field">
               <label htmlFor="maxTripNights">Maximum nights</label>
               <input
-                defaultValue="10"
+                defaultValue={values.maxTripNights}
                 id="maxTripNights"
                 max="60"
                 min="1"
@@ -257,7 +303,7 @@ export function WatchBuilder() {
                 </>
               ) : (
                 <input
-                  defaultChecked={cabin.value !== "FIRST"}
+                  defaultChecked={values.cabins.includes(cabin.value)}
                   name="cabins"
                   type="checkbox"
                   value={cabin.value}
@@ -284,7 +330,7 @@ export function WatchBuilder() {
           <div className="builder-field">
             <label htmlFor="passengers">Passengers</label>
             <input
-              defaultValue="1"
+              defaultValue={values.passengers}
               id="passengers"
               max="9"
               min="1"
@@ -296,7 +342,7 @@ export function WatchBuilder() {
           </div>
           <div className="builder-field">
             <label htmlFor="maxStops">Maximum stops</label>
-            <select defaultValue="1" id="maxStops" name="maxStops">
+            <select defaultValue={values.maxStops} id="maxStops" name="maxStops">
               <option value="">Any</option>
               <option value="0">Nonstop only</option>
               <option value="1">Up to one stop</option>
@@ -313,6 +359,7 @@ export function WatchBuilder() {
               name="maxDurationHours"
               placeholder="Optional hours"
               type="number"
+              defaultValue={values.maxDurationHours}
             />
             <small>Applies to each direction.</small>
             <FieldError errors={state.errors} field="maxDurationHours" />
@@ -334,7 +381,7 @@ export function WatchBuilder() {
             <label htmlFor="peNearInversionPct">Premium Economy near Economy</label>
             <div className="input-suffix">
               <input
-                defaultValue="15"
+                defaultValue={values.peNearInversionPct}
                 id="peNearInversionPct"
                 max="100"
                 min="0"
@@ -352,7 +399,7 @@ export function WatchBuilder() {
             <label htmlFor="businessVsPePct">Business near Premium Economy</label>
             <div className="input-suffix">
               <input
-                defaultValue="30"
+                defaultValue={values.businessVsPePct}
                 id="businessVsPePct"
                 max="500"
                 min="0"
