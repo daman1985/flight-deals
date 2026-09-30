@@ -2,9 +2,18 @@ import type { Metadata } from "next";
 
 import Link from "next/link";
 
+import { createClient } from "@/lib/supabase/server";
+
 export const metadata: Metadata = { title: "Briefing" };
 
-export default function DealFeedPage() {
+export default async function DealFeedPage() {
+  const supabase = await createClient();
+  const { count } = await supabase
+    .from("watches")
+    .select("id", { count: "exact", head: true })
+    .eq("active", true);
+  const liveWatchCount = count ?? 0;
+
   return (
     <div className="page-frame briefing-page">
       <header className="briefing-hero">
@@ -51,10 +60,10 @@ export default function DealFeedPage() {
       </header>
 
       <dl className="briefing-ledger" aria-label="Monitoring summary">
-        <div><dt>Live watches</dt><dd>00</dd></div>
+        <div><dt>Live watches</dt><dd>{String(liveWatchCount).padStart(2, "0")}</dd></div>
         <div><dt>Verified signals</dt><dd>00</dd></div>
-        <div><dt>Provider state</dt><dd>Offline</dd></div>
-        <div><dt>Display mode</dt><dd>Fixture</dd></div>
+        <div><dt>Provider state</dt><dd>Proven</dd></div>
+        <div><dt>Coverage</dt><dd>Manual</dd></div>
       </dl>
 
       <section className="quiet-feed" aria-labelledby="quiet-heading">
@@ -63,9 +72,9 @@ export default function DealFeedPage() {
           <p className="eyebrow">Signal ledger</p>
           <h2 id="quiet-heading">Nothing has earned the front page yet.</h2>
           <p>
-            That is the honest state: monitoring is not connected, so there are no
-            verified anomalies to publish. When evidence arrives, each entry will show
-            the route, cabin gap, comparison scope, freshness, and search health together.
+            That is the honest state: acquisition works, but rotating coverage and alerting
+            are not automated yet. When evidence earns a signal, each entry will show the
+            route, cabin gap, comparison scope, freshness, and search health together.
           </p>
         </div>
         <div className="reading-key" aria-label="How to read a future signal">
