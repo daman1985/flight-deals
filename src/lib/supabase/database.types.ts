@@ -234,6 +234,8 @@ export type Database = {
           destination: string
           id: string
           last_scanned_at: string | null
+          lease_expires_at: string | null
+          lease_token: string | null
           next_scan_at: string | null
           origin: string
           priority: number
@@ -249,6 +251,8 @@ export type Database = {
           destination: string
           id?: string
           last_scanned_at?: string | null
+          lease_expires_at?: string | null
+          lease_token?: string | null
           next_scan_at?: string | null
           origin: string
           priority?: number
@@ -264,6 +268,8 @@ export type Database = {
           destination?: string
           id?: string
           last_scanned_at?: string | null
+          lease_expires_at?: string | null
+          lease_token?: string | null
           next_scan_at?: string | null
           origin?: string
           priority?: number
@@ -339,6 +345,41 @@ export type Database = {
             foreignKeyName: "search_runs_watch_id_fkey"
             columns: ["watch_id"]
             isOneToOne: false
+            referencedRelation: "watches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      watch_planning_state: {
+        Row: {
+          completed_cycles: number
+          last_planned_at: string
+          next_departure_date: string
+          next_trip_nights: number
+          updated_at: string
+          watch_id: string
+        }
+        Insert: {
+          completed_cycles?: number
+          last_planned_at?: string
+          next_departure_date: string
+          next_trip_nights: number
+          updated_at?: string
+          watch_id: string
+        }
+        Update: {
+          completed_cycles?: number
+          last_planned_at?: string
+          next_departure_date?: string
+          next_trip_nights?: number
+          updated_at?: string
+          watch_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "watch_planning_state_watch_id_fkey"
+            columns: ["watch_id"]
+            isOneToOne: true
             referencedRelation: "watches"
             referencedColumns: ["id"]
           },
@@ -424,7 +465,52 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      claim_due_search_candidates: {
+        Args: {
+          p_lease_seconds?: number
+          p_lease_token: string
+          p_limit: number
+        }
+        Returns: {
+          active: boolean
+          cabin: string
+          created_at: string
+          departure_date: string
+          destination: string
+          id: string
+          last_scanned_at: string | null
+          lease_expires_at: string | null
+          lease_token: string | null
+          next_scan_at: string | null
+          origin: string
+          priority: number
+          return_date: string | null
+          scan_count: number
+          watch_id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "search_candidates"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      complete_search_candidate: {
+        Args: {
+          p_candidate_id: string
+          p_lease_token: string
+          p_next_scan_at: string
+        }
+        Returns: boolean
+      }
+      deactivate_search_candidates_outside_window: {
+        Args: {
+          p_first_departure: string
+          p_last_departure: string
+          p_watch_id: string
+        }
+        Returns: number
+      }
     }
     Enums: {
       [_ in never]: never

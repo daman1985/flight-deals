@@ -110,7 +110,7 @@ export default async function WatchesPage() {
         {watches.map((watch, index) => {
           const scope = scopeFor(watch);
           return (
-            <article className="watch-entry watch-entry-live" key={watch.id}>
+            <Link className="watch-entry watch-entry-live" href={`/watches/${watch.id}`} key={watch.id}>
               <span className="entry-index">{String(index + 1).padStart(3, "0")}</span>
               <span className="entry-route-block">
                 <span className="entry-route">
@@ -131,8 +131,8 @@ export default async function WatchesPage() {
                 {watch.active ? "Watching" : "Paused"}
                 <small>{watch.active ? "Ready for coverage" : "Not scanning"}</small>
               </span>
-              <span className="entry-arrow" aria-hidden="true">—</span>
-            </article>
+              <span className="entry-arrow" aria-hidden="true">↗</span>
+            </Link>
           );
         })}
       </section>

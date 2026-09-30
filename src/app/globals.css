@@ -533,6 +533,7 @@ h1, h2, p, dl, dd { margin-top: 0; }
 .breadcrumb { display: flex; gap: 9px; margin: 0; color: var(--ink-soft); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
 .breadcrumb a:hover { color: var(--signal); }
 .fixture-label { margin: 0; border: 1px solid var(--ink); padding: 7px 10px; color: var(--ink); }
+.live-label { margin: 0; border: 1px solid var(--signal); padding: 7px 10px; color: var(--signal); font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
 .route-lockup { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, .75fr) 190px; gap: 56px; align-items: end; padding: 58px 0 50px; }
 .route-lockup .folio { margin-bottom: 24px; }
 .route-lockup h1 { display: flex; align-items: center; gap: clamp(18px, 3vw, 52px); margin: 0; font-size: clamp(72px, 10vw, 158px); font-weight: 510; letter-spacing: -.075em; line-height: .72; }
@@ -549,6 +550,7 @@ h1, h2, p, dl, dd { margin-top: 0; }
 .trust-block .system-dot { grid-row: span 2; }
 .trust-block strong { font-size: 13px; }
 .trust-block small { color: var(--ink-soft); font-size: 10px; }
+.system-dot-live { border-color: var(--signal); background: var(--signal); }
 
 .signal-brief { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(320px, .5fr); background: var(--ink); color: var(--paper-bright); }
 .signal-story { padding: clamp(44px, 6vw, 88px); }
@@ -570,6 +572,8 @@ h1, h2, p, dl, dd { margin-top: 0; }
 .cabin-row strong { font-size: clamp(32px, 4vw, 56px); font-weight: 500; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
 .ladder-code { color: var(--ink-soft); font-family: var(--font-serif), Georgia, serif; font-size: 26px; font-style: italic; }
 .ladder-name { font-family: var(--font-serif), Georgia, serif; font-size: clamp(22px, 2.5vw, 36px); }
+.ladder-name small { display: block; margin-top: 6px; color: var(--ink-soft); font-family: var(--font-sans), Arial, sans-serif; font-size: 9px; font-style: normal; font-weight: 650; letter-spacing: .1em; text-transform: uppercase; }
+.fare-provenance { order: 2; margin: 0; padding: 11px 0 11px 100px; border-bottom: 1px solid var(--rule); color: var(--ink-soft); font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
 .ladder-delta { order: 2; display: grid; grid-template-columns: 100px 1fr auto; margin: 0; padding: 12px 0; color: var(--ink-soft); font-size: 11px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; font-variant-numeric: tabular-nums; }
 .ladder-delta span { grid-column: 1; }
 .ladder-delta small { grid-column: 3; color: var(--ink-soft); }
@@ -595,6 +599,14 @@ h1, h2, p, dl, dd { margin-top: 0; }
 .scan-health dl div:last-child { border-right: 0; }
 .scan-health dt { color: var(--ink-soft); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
 .scan-health dd { margin: 12px 0 0; font-size: 12px; font-weight: 650; }
+.run-ledger { padding: 72px 0 0; }
+.run-ledger-table { border-bottom: 1px solid var(--ink); }
+.run-ledger-row { display: grid; grid-template-columns: 60px 1.2fr .8fr .8fr 1fr; gap: 24px; align-items: center; min-height: 62px; border-bottom: 1px solid var(--rule); font-size: 11px; }
+.run-ledger-row:last-child { border-bottom: 0; }
+.run-ledger-row > span:first-child { color: var(--signal); font-family: var(--font-serif), Georgia, serif; font-size: 20px; font-style: italic; }
+.run-ledger-row strong { font-size: 11px; }
+.run-ledger-row time, .run-ledger-row span { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.ledger-empty { margin: 0; padding: 32px 0; color: var(--ink-soft); }
 
 .site-footer { display: flex; width: min(calc(100% - 48px), var(--content)); min-height: 86px; align-items: center; justify-content: space-between; margin: 0 auto; border-top: 1px solid var(--ink); color: var(--ink-soft); font-size: 9px; letter-spacing: .12em; text-transform: uppercase; }
 
@@ -697,6 +709,10 @@ h1, h2, p, dl, dd { margin-top: 0; }
   .spread-labels strong { grid-column: 1 / -1; text-align: left; }
   .scan-health dl { min-width: 0; grid-template-columns: 1fr; }
   .scan-health dl div, .scan-health dl div:not(:first-child) { min-height: 70px; padding: 13px 0; border-right: 0; border-bottom: 1px solid var(--rule); }
+  .fare-provenance { padding-left: 48px; }
+  .run-ledger-row { grid-template-columns: 44px 1fr; gap: 8px 16px; padding: 14px 0; }
+  .run-ledger-row > span:first-child { grid-row: span 2; }
+  .run-ledger-row time { grid-column: 2; }
   .site-footer { width: min(calc(100% - 28px), var(--content)); align-items: flex-start; flex-direction: column; justify-content: center; gap: 7px; }
 }
 

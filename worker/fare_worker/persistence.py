@@ -9,6 +9,12 @@ import httpx
 
 from .detector import CabinComparison, DetectionThresholds
 from .models import Cabin, FareOffer, FareSearchRequest, FareSearchResponse, SearchStatus
+from .planner import (
+    DateMode,
+    PlannedCandidate,
+    PlanningCursor,
+    WatchPlan,
+)
 
 
 class SupabaseRestStore:
@@ -91,6 +97,160 @@ class SupabaseRestStore:
         )
         return str(rows[0]["id"])
 
+    def load_active_watches(self) -> list[dict[str, Any]]:
+        """Load active definitions and runtime constraints for planning and scans."""
+        return self._request(
+            "GET",
+            "/watches",
+            params={
+                "active": "is.true",
+                "select": (
+                    "id,origin_airports,destination_airports,date_mode,cabins,"
+                    "exact_departure_date,exact_return_date,window_departure_start,"
+                    "window_departure_end,min_trip_nights,max_trip_nights,"
+                    "rolling_horizon_days,passengers,max_stops"
+                ),
+                "order": "created_at.asc",
+            },
+        )
+
+    @staticmethod
+    def watch_plan_from_row(row: dict[str, Any]) -> WatchPlan:
+        """Convert an explicitly selected watch row into the pure planner model."""
+        return WatchPlan(
+            id=str(row["id"]),
+            origin_airports=tuple(row["origin_airports"]),
+            destination_airports=tuple(row["destination_airports"]),
+            date_mode=DateMode(row["date_mode"]),
+            cabins=tuple(Cabin(cabin) for cabin in row["cabins"]),
+            exact_departure_date=_optional_date(row["exact_departure_date"]),
+            exact_return_date=_optional_date(row["exact_return_date"]),
+            window_departure_start=_optional_date(row["window_departure_start"]),
+            window_departure_end=_optional_date(row["window_departure_end"]),
+            min_trip_nights=row["min_trip_nights"],
+            max_trip_nights=row["max_trip_nights"],
+            rolling_horizon_days=row["rolling_horizon_days"],
+        )
+
+    def load_planning_cursor(self, watch_id: str) -> PlanningCursor | None:
+        """Load the continuation cursor for a watch when one exists."""
+        rows = self._request(
+            "GET",
+            "/watch_planning_state",
+            params={
+                "watch_id": f"eq.{watch_id}",
+                "select": "next_departure_date,next_trip_nights,completed_cycles",
+                "limit": "1",
+            },
+        )
+        if not rows:
+            return None
+        return PlanningCursor(
+            departure_date=date.fromisoformat(rows[0]["next_departure_date"]),
+            trip_nights=int(rows[0]["next_trip_nights"]),
+            completed_cycles=int(rows[0]["completed_cycles"]),
+        )
+
+    def persist_planning_batch(
+        self,
+        *,
+        watch_id: str,
+        candidates: tuple[PlannedCandidate, ...],
+        next_cursor: PlanningCursor,
+    ) -> None:
+        """Idempotently save a bounded candidate batch and its next cursor."""
+        if candidates:
+            payload = [
+                {
+                    "watch_id": watch_id,
+                    "origin": candidate.origin,
+                    "destination": candidate.destination,
+                    "departure_date": candidate.departure_date.isoformat(),
+                    "return_date": candidate.return_date.isoformat(),
+                    "cabin": candidate.cabin.value,
+                    "priority": candidate.priority,
+                    "active": True,
+                }
+                for candidate in candidates
+            ]
+            self._request(
+                "POST",
+                "/search_candidates",
+                params={
+                    "on_conflict": (
+                        "watch_id,origin,destination,departure_date,return_date,cabin"
+                    )
+                },
+                headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
+                json=payload,
+            )
+
+        now = datetime.now(timezone.utc).isoformat()
+        self._request(
+            "POST",
+            "/watch_planning_state",
+            params={"on_conflict": "watch_id"},
+            headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
+            json={
+                "watch_id": watch_id,
+                "next_departure_date": next_cursor.departure_date.isoformat(),
+                "next_trip_nights": next_cursor.trip_nights,
+                "completed_cycles": next_cursor.completed_cycles,
+                "last_planned_at": now,
+                "updated_at": now,
+            },
+        )
+
+    def deactivate_candidates_outside_window(
+        self,
+        *,
+        watch_id: str,
+        first_departure: date,
+        last_departure: date,
+    ) -> int:
+        """Expire candidates that have rolled outside the watch's date window."""
+        affected = self._request(
+            "POST",
+            "/rpc/deactivate_search_candidates_outside_window",
+            json={
+                "p_watch_id": watch_id,
+                "p_first_departure": first_departure.isoformat(),
+                "p_last_departure": last_departure.isoformat(),
+            },
+        )
+        return int(affected)
+
+    def claim_due_candidates(
+        self,
+        *,
+        limit: int,
+        lease_token: str,
+        lease_seconds: int = 900,
+    ) -> list[dict[str, Any]]:
+        """Atomically lease due candidates without blocking parallel workers."""
+        return self._request(
+            "POST",
+            "/rpc/claim_due_search_candidates",
+            json={
+                "p_limit": limit,
+                "p_lease_token": lease_token,
+                "p_lease_seconds": lease_seconds,
+            },
+        )
+
+    def release_candidate(self, candidate_id: str, lease_token: str) -> None:
+        """Release a claim after an unexpected local failure."""
+        self._request(
+            "PATCH",
+            "/search_candidates",
+            params={
+                "id": f"eq.{candidate_id}",
+                "lease_token": f"eq.{lease_token}",
+            },
+            headers={"Prefer": "return=minimal"},
+            json={"lease_token": None, "lease_expires_at": None},
+        )
+
     def persist_response(
         self,
         *,
@@ -98,6 +258,8 @@ class SupabaseRestStore:
         candidate_id: str,
         response: FareSearchResponse,
         started_at: datetime,
+        lease_token: str | None = None,
+        next_scan_at: datetime | None = None,
     ) -> str:
         """Store health for every attempt and fares only for valid responses."""
         health = response.health
@@ -159,17 +321,35 @@ class SupabaseRestStore:
                 json=observations,
             )
 
-        self._request(
-            "PATCH",
-            "/search_candidates",
-            params={"id": f"eq.{candidate_id}"},
-            headers={"Prefer": "return=minimal"},
-            json={
-                "last_scanned_at": finished_at.isoformat(),
-                "scan_count": _increment_scan_count_unavailable_marker(),
-            },
-            allow_scan_count_marker=True,
-        )
+        if lease_token is not None:
+            completed = self._request(
+                "POST",
+                "/rpc/complete_search_candidate",
+                json={
+                    "p_candidate_id": candidate_id,
+                    "p_lease_token": lease_token,
+                    "p_next_scan_at": (
+                        next_scan_at.isoformat() if next_scan_at is not None else None
+                    ),
+                },
+            )
+            if completed is not True:
+                raise RuntimeError("Candidate lease expired before completion")
+        else:
+            self._request(
+                "PATCH",
+                "/search_candidates",
+                params={"id": f"eq.{candidate_id}"},
+                headers={"Prefer": "return=minimal"},
+                json={
+                    "last_scanned_at": finished_at.isoformat(),
+                    "next_scan_at": (
+                        next_scan_at.isoformat() if next_scan_at is not None else None
+                    ),
+                    "scan_count": _increment_scan_count_unavailable_marker(),
+                },
+                allow_scan_count_marker=True,
+            )
         return run_id
 
     def load_detection_input(
@@ -334,6 +514,10 @@ class SupabaseRestStore:
 def _increment_scan_count_unavailable_marker() -> int:
     """Return a placeholder replaced by `_request` after reading current state."""
     return 0
+
+
+def _optional_date(value: str | None) -> date | None:
+    return date.fromisoformat(value) if value else None
 
 
 def _offers_from_rows(rows: list[dict[str, Any]]) -> list[FareOffer]:

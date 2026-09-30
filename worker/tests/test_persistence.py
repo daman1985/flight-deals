@@ -121,6 +121,35 @@ def test_rest_paths_stay_under_postgrest_base_url() -> None:
     assert observed_paths == ["/rest/v1/watches"]
 
 
+def test_claim_due_candidates_uses_worker_only_rpc() -> None:
+    observed_requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_requests.append(request)
+        return httpx.Response(200, json=[])
+
+    store = SupabaseRestStore("https://example.supabase.co", "test-secret")
+    store._client.close()
+    store._client = httpx.Client(
+        base_url="https://example.supabase.co/rest/v1/",
+        transport=httpx.MockTransport(handler),
+    )
+
+    try:
+        claimed = store.claim_due_candidates(
+            limit=3,
+            lease_token="00000000-0000-4000-8000-000000000010",
+        )
+    finally:
+        store.close()
+
+    assert claimed == []
+    assert observed_requests[0].url.path == (
+        "/rest/v1/rpc/claim_due_search_candidates"
+    )
+    assert json.loads(observed_requests[0].content)["p_limit"] == 3
+
+
 def test_anomaly_persistence_uses_idempotent_primary_key_upsert() -> None:
     comparison = evaluate_cabin_spreads(
         WATCH_ID,

@@ -2,7 +2,7 @@
 
 ## Scope
 
-This foundation proves that one exact YVR → SNA round trip can be searched independently in Economy, Premium Economy, and Business, normalized into provider-neutral offers, and persisted without confusing provider health with price movement.
+The system plans and rotates bounded cross-cabin searches for saved Exact, Window, and Anytime watches. Provider responses are normalized into provider-neutral offers and persisted without confusing provider health with price movement.
 
 ## Components
 
@@ -10,11 +10,11 @@ This foundation proves that one exact YVR → SNA round trip can be searched ind
 Next.js App Router
   ├─ provider-neutral TypeScript domain
   ├─ Supabase server client
-  └─ future authenticated product UI
+  └─ authenticated live watch dossiers
              │
              ▼
 Supabase/Postgres
-  ├─ watches and search candidates
+  ├─ watches, planning cursors, and leased search candidates
   ├─ search runs (health)
   ├─ fare observations (valid prices only)
   ├─ anomalies
@@ -25,7 +25,7 @@ Python worker
   ├─ provider-neutral request/response models
   ├─ FareProvider protocol
   ├─ FliProvider adapter
-  └─ controlled sequential acquisition flow
+  └─ bounded sequential rotation flow
 ```
 
 The Next.js/domain layer never imports `fli`. Provider-specific structures are converted inside `worker/fare_worker/providers/fli_adapter.py`.
@@ -74,6 +74,18 @@ python -m fare_worker.controlled_flow
 
 It is deliberately excluded from normal CI.
 
+## Rotating Milestone 4 flow
+
+`fare-worker-rotate` performs one safe, bounded cycle:
+
+1. Continue each active watch from its persisted date-pair cursor.
+2. Upsert complete route/date/cabin combinations without splitting a date pair.
+3. Atomically claim a small due batch with `FOR UPDATE SKIP LOCKED` and an expiring lease.
+4. Search sequentially, store health for every attempt, and store fares only for valid results.
+5. Schedule the next scan from the candidate priority and run the deterministic detector once per affected watch.
+
+The initial priority bands are 0–30 days, 31–90 days, 91–180 days, and farther-future. Normal tests exercise the planner with fixtures and never call Google Flights.
+
 ## Database security
 
 - Every public table has RLS enabled.
@@ -82,6 +94,7 @@ It is deliberately excluded from normal CI.
 - The worker uses a server-only Supabase secret key and never sends it to browser code.
 - Raw provider payloads remain behind the same ownership policy and are not rendered by the client.
 - Schema changes are represented by migration files.
+- Queue RPCs run with caller privileges, are executable only by `service_role`, and use short claim/complete transactions. No external request is made while a database row lock is held.
 
 ## Deployment boundary
 
