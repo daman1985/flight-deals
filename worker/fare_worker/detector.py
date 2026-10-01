@@ -57,6 +57,7 @@ class CabinComparison:
     return_stop_bucket: str
     anomaly_type: AnomalyType | None = None
     severity: AnomalySeverity | None = None
+    historical_context: dict[str, object] | None = None
 
     @property
     def is_anomaly(self) -> bool:
@@ -64,7 +65,7 @@ class CabinComparison:
 
     def explanation(self) -> dict[str, object]:
         """Return bounded evidence suitable for the anomaly explanation JSON."""
-        return {
+        explanation: dict[str, object] = {
             "rule": self.anomaly_type.value if self.anomaly_type else "NO_ANOMALY",
             "threshold_pct": self.threshold_pct,
             "comparison_scope": {
@@ -83,6 +84,9 @@ class CabinComparison:
                 "flight_numbers": self.higher_offer.flight_numbers,
             },
         }
+        if self.historical_context is not None:
+            explanation["historical_context"] = self.historical_context
+        return explanation
 
 
 ComparisonScope = tuple[str, str, str, str, str, str, str]

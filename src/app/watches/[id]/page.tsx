@@ -1,11 +1,12 @@
-/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 18: /bin/ps: Operation not permitted
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { RelativeTime } from "@/app/_components/relative-time";
 import { ConfirmedAlertLedger } from "@/app/_components/confirmed-alert-ledger";
+import { HistoricalContextPanel } from "@/app/_components/historical-context-panel";
 import { calculateCabinSpread } from "@/domain/spread";
+import { historicalContextFromJson } from "@/domain/history";
 import { evidenceFreshness, scanIsOverdue } from "@/domain/trust";
 import { getConfirmedInAppAlerts } from "@/lib/supabase/confirmed-alerts";
 import type { Database } from "@/lib/supabase/database.types";
@@ -21,6 +22,7 @@ type Observation = Omit<
   "raw_payload_json"
 >;
 type Anomaly = Database["public"]["Tables"]["anomalies"]["Row"];
+type HistorySnapshot = Database["public"]["Tables"]["comparison_history_snapshots"]["Row"];
 
 const cabinOrder = ["ECONOMY", "PREMIUM_ECONOMY", "BUSINESS", "FIRST"];
 const cabinNames: Record<string, string> = {
@@ -259,7 +261,14 @@ export default async function LiveWatchPage({ params }: { params: Promise<{ id: 
 
   if (watchError || !watchData) notFound();
   const watch = watchData as Watch;
-  const [candidateResult, runResult, observationResult, anomalyResult, confirmedAlertResult] = await Promise.all([
+  const [
+    candidateResult,
+    runResult,
+    observationResult,
+    anomalyResult,
+    confirmedAlertResult,
+    historyResult,
+  ] = await Promise.all([
     supabase
       .from("search_candidates")
       .select("*")
@@ -288,12 +297,19 @@ export default async function LiveWatchPage({ params }: { params: Promise<{ id: 
       .order("first_detected_at", { ascending: false })
       .limit(100),
     getConfirmedInAppAlerts(supabase, { watchId: id, limit: 8 }),
+    supabase
+      .from("comparison_history_snapshots")
+      .select("*")
+      .eq("watch_id", id)
+      .order("updated_at", { ascending: false })
+      .limit(100),
   ]);
 
   const candidates = (candidateResult.data ?? []) as Candidate[];
   const runs = (runResult.data ?? []) as SearchRun[];
   const observations = (observationResult.data ?? []) as Observation[];
   const anomalies = (anomalyResult.data ?? []) as Anomaly[];
+  const historySnapshots = (historyResult.data ?? []) as HistorySnapshot[];
   const candidateById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
   const currentRuns = runs.filter((run) => candidateById.has(run.candidate_id));
   const latestCandidate = currentRuns[0]
@@ -337,6 +353,19 @@ export default async function LiveWatchPage({ params }: { params: Promise<{ id: 
         anomaly.return_date === latestCandidate.return_date,
       )
     : undefined;
+  const currentHistorySnapshot = latestCandidate
+    ? historySnapshots.find((snapshot) =>
+        snapshot.origin === latestCandidate.origin
+        && snapshot.destination === latestCandidate.destination
+        && snapshot.departure_date === latestCandidate.departure_date
+        && snapshot.return_date === latestCandidate.return_date
+        && (!currentAnomaly || snapshot.id === currentAnomaly.id),
+      )
+    : undefined;
+  const currentHistoricalContext = historicalContextFromJson(
+    currentHistorySnapshot?.historical_context,
+  );
+  const historyLoadFailed = Boolean(historyResult.error);
   const overdue = scanIsOverdue(nextScan);
   const dataReadFailed = Boolean(
     candidateResult.error || runResult.error || observationResult.error || anomalyResult.error,
@@ -447,6 +476,29 @@ export default async function LiveWatchPage({ params }: { params: Promise<{ id: 
           showWatchLink={false}
         />
       </section>
+
+      {currentHistoricalContext && currentHistorySnapshot ? (
+        <HistoricalContextPanel
+          context={currentHistoricalContext}
+          currentSpreadPct={currentHistorySnapshot.spread_pct}
+        />
+      ) : (
+        <section className="history-panel history-panel-empty" aria-labelledby="history-heading">
+          <div className="history-panel-intro">
+            <p className="eyebrow">Historical price context</p>
+            <h2 id="history-heading">
+              {historyLoadFailed
+                ? "Historical context is temporarily unavailable."
+                : "Building an exact comparison history."}
+            </h2>
+            <p>
+              {historyLoadFailed
+                ? "The current fares and scan health remain available. Try again before using historical evidence to interpret this relationship."
+                : "No comparable acquisition cycle is available for the current route, dates, cabin pair, currency, passenger count, and stop pattern yet. Future complete scans will accumulate this evidence without pooling unlike itineraries."}
+            </p>
+          </div>
+        </section>
+      )}
 
       <section className="cabin-snapshot" aria-labelledby="live-cabin-heading">
         <div className="section-heading-row">

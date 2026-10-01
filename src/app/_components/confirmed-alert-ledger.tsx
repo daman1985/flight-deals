@@ -1,5 +1,6 @@
-/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 18: /bin/ps: Operation not permitted
 import Link from "next/link";
+
+import { historicalReadiness, type HistoricalContext } from "@/domain/history";
 
 export type ConfirmedAlertEntry = {
   alert: {
@@ -30,6 +31,7 @@ export type ConfirmedAlertEntry = {
     higher_observation_id: string | null;
     lower_run_id: string | null;
     higher_run_id: string | null;
+    historical_context: HistoricalContext | null;
   };
   watch: { id: string; name: string };
 };
@@ -118,6 +120,7 @@ export function ConfirmedAlertLedger({
           anomaly.lower_run_id && `Run ${anomaly.lower_run_id}`,
           anomaly.higher_run_id && `Run ${anomaly.higher_run_id}`,
         ].filter((value): value is string => Boolean(value));
+        const history = anomaly.historical_context;
 
         return (
           <li className="confirmed-alert-row" key={alert.id}>
@@ -143,6 +146,27 @@ export function ConfirmedAlertLedger({
                   {outboundStops && returnStops ? " · " : null}
                   {returnStops ? `Return ${returnStops}` : null}
                 </p>
+              ) : null}
+              {history ? (
+                <p className="confirmed-alert-history">
+                  History at confirmation · {history.spreadPct.percentile !== null
+                    ? `${history.spreadPct.percentile.toFixed(1)}th percentile · `
+                    : ""}
+                  {historicalReadiness(history.spreadPct)}
+                </p>
+              ) : null}
+              {history ? (
+                <details className="confirmed-alert-evidence">
+                  <summary>Historical comparison details</summary>
+                  <p>
+                    Median cabin gap {history.spreadPct.median === null
+                      ? "not available"
+                      : `${history.spreadPct.median.toFixed(1)}%`}
+                    {history.spreadPct.mad === null
+                      ? ""
+                      : ` · median absolute deviation ${history.spreadPct.mad.toFixed(1)} points`}
+                  </p>
+                </details>
               ) : null}
               {evidenceIds.length > 0 ? (
                 <details className="confirmed-alert-evidence">

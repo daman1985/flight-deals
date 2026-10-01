@@ -4,7 +4,8 @@ A private airfare monitor for detecting unusual relationships between Economy, P
 
 ## Current scope
 
-This repository covers Milestone 0 through the bounded Milestone 4 rotation loop:
+This repository covers the foundation through unattended rotation, reconfirmed alerts,
+and the first historical-intelligence layer:
 
 - Next.js application foundation
 - provider-neutral fare/search contracts
@@ -20,8 +21,12 @@ This repository covers Milestone 0 through the bounded Milestone 4 rotation loop
 - atomic, lease-backed due-work claims for low-concurrency workers
 - a 15-minute GitHub Actions rotation with manual dispatch
 - a live watch dossier backed by RLS-protected Supabase evidence
+- durable delayed anomaly reconfirmation with lease recovery and deduplicated in-app alerts
+- explicit acquisition-batch, passenger, stop, and duration provenance for every normal scan
+- exact-scope median, MAD, empirical percentile, and sample-readiness evidence
+- RLS-protected historical comparison snapshots on each live watch and confirmed alert
 
-Historical anomaly modeling, alerts, booking, AI features, and additional providers are out of scope.
+Booking, email delivery, contextual AI, and additional fare providers remain future work.
 
 ## Repository layout
 

@@ -1,4 +1,3 @@
-/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 18: /bin/ps: Operation not permitted
 """Plan and process one bounded rotation of due fare searches."""
 
 from __future__ import annotations
@@ -131,6 +130,8 @@ def run_rotation(
                 response=response,
                 started_at=started_at,
                 lease_token=lease_token,
+                acquisition_batch_id=lease_token,
+                request_max_duration_minutes=watch["max_duration_minutes"],
                 next_scan_at=next_scan_time(
                     priority=int(candidate["priority"]),
                     status=response.health.status,

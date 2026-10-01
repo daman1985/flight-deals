@@ -1,4 +1,3 @@
-/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 18: /bin/ps: Operation not permitted
 """Narrow Supabase REST persistence used by the controlled proof."""
 
 from __future__ import annotations
@@ -109,7 +108,7 @@ class SupabaseRestStore:
                     "id,origin_airports,destination_airports,date_mode,cabins,"
                     "exact_departure_date,exact_return_date,window_departure_start,"
                     "window_departure_end,min_trip_nights,max_trip_nights,"
-                    "rolling_horizon_days,passengers,max_stops"
+                    "rolling_horizon_days,passengers,max_stops,max_duration_minutes"
                 ),
                 "order": "created_at.asc",
             },
@@ -262,6 +261,8 @@ class SupabaseRestStore:
         lease_token: str | None = None,
         next_scan_at: datetime | None = None,
         update_candidate: bool = True,
+        acquisition_batch_id: str | None = None,
+        request_max_duration_minutes: int | None = None,
         reconfirmation_anomaly_id: str | None = None,
         reconfirmation_lease_token: str | None = None,
     ) -> str:
@@ -281,7 +282,12 @@ class SupabaseRestStore:
             "error_code": health.provider_error_code,
             "error_message": health.provider_error_message,
             "latency_ms": health.latency_ms,
+            "request_passengers": response.request.passengers,
+            "request_max_stops": response.request.max_stops,
+            "request_max_duration_minutes": request_max_duration_minutes,
         }
+        if acquisition_batch_id is not None:
+            run_payload["acquisition_batch_id"] = acquisition_batch_id
         if reconfirmation_anomaly_id is not None:
             run_payload["reconfirmation_anomaly_id"] = reconfirmation_anomaly_id
             run_payload["reconfirmation_lease_token"] = reconfirmation_lease_token
@@ -423,8 +429,9 @@ class SupabaseRestStore:
             "/search_runs",
             params={
                 "watch_id": f"eq.{watch_id}",
-                "select": "id,candidate_id,status,finished_at",
+                "select": "id,candidate_id,status,finished_at,acquisition_batch_id",
                 "order": "finished_at.desc",
+                "reconfirmation_anomaly_id": "is.null",
             },
         )
         latest_by_candidate: dict[str, dict[str, Any]] = {}
@@ -446,7 +453,8 @@ class SupabaseRestStore:
                 "search_run_id": f"in.({','.join(valid_run_ids)})",
                 "quality_eligible": "is.true",
                 "select": (
-                    "provider,origin,destination,departure_date,return_date,cabin,"
+                    "id,search_run_id,provider,origin,destination,departure_date,"
+                    "return_date,cabin,"
                     "airline,flight_numbers,stops_outbound,stops_return,"
                     "duration_outbound_minutes,duration_return_minutes,total_price,"
                     "currency,booking_url,observed_at"
@@ -454,7 +462,37 @@ class SupabaseRestStore:
                 "order": "observed_at.desc",
             },
         )
-        return thresholds, _offers_from_rows(rows)
+        batch_by_run = {
+            str(run["id"]): run.get("acquisition_batch_id")
+            for run in runs
+        }
+        return thresholds, _offers_from_rows(rows, batch_by_run=batch_by_run)
+
+    def load_historical_comparison_context(
+        self,
+        watch_id: str,
+        comparison: CabinComparison,
+    ) -> dict[str, object] | None:
+        """Load a coherent historical snapshot for one exact current comparison."""
+        lower = comparison.lower_offer
+        higher = comparison.higher_offer
+        if (
+            lower.observation_id is None
+            or higher.observation_id is None
+            or lower.acquisition_batch_id is None
+            or lower.acquisition_batch_id != higher.acquisition_batch_id
+        ):
+            return None
+        context = self._request(
+            "POST",
+            "/rpc/get_historical_comparison_context",
+            json={
+                "p_watch_id": watch_id,
+                "p_lower_observation_id": lower.observation_id,
+                "p_higher_observation_id": higher.observation_id,
+            },
+        )
+        return context if isinstance(context, dict) else None
 
     def persist_comparison_results(
         self,
@@ -462,11 +500,66 @@ class SupabaseRestStore:
         comparisons: list[CabinComparison],
     ) -> tuple[int, int]:
         """Upsert detected anomalies and resolve only complete non-anomalous pairs."""
+        history_payload = []
+        for comparison in comparisons:
+            context = comparison.historical_context
+            scope = context.get("scope") if isinstance(context, dict) else None
+            if not isinstance(scope, dict):
+                continue
+            lower = comparison.lower_offer
+            higher = comparison.higher_offer
+            if (
+                lower.observation_id is None
+                or higher.observation_id is None
+                or lower.acquisition_batch_id is None
+                or lower.acquisition_batch_id != higher.acquisition_batch_id
+                or not isinstance(scope.get("passengers"), int)
+            ):
+                continue
+            history_payload.append({
+                "id": comparison.anomaly_id,
+                "watch_id": watch_id,
+                "origin": lower.origin,
+                "destination": lower.destination,
+                "departure_date": lower.departure_date.isoformat(),
+                "return_date": lower.return_date.isoformat() if lower.return_date else None,
+                "lower_cabin": lower.cabin.value,
+                "higher_cabin": higher.cabin.value,
+                "currency": lower.currency,
+                "outbound_stop_bucket": comparison.outbound_stop_bucket,
+                "return_stop_bucket": comparison.return_stop_bucket,
+                "passengers": scope["passengers"],
+                "lower_cabin_price": lower.total_price,
+                "higher_cabin_price": higher.total_price,
+                "spread_amount": comparison.spread_amount,
+                "spread_pct": comparison.spread_pct,
+                "acquisition_batch_id": lower.acquisition_batch_id,
+                "lower_observation_id": lower.observation_id,
+                "higher_observation_id": higher.observation_id,
+                "historical_context": context,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            })
+        if history_payload:
+            self._request(
+                "POST",
+                "/comparison_history_snapshots",
+                params={"on_conflict": "id"},
+                headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
+                json=history_payload,
+            )
+
         anomalies = [comparison for comparison in comparisons if comparison.is_anomaly]
         persisted = 0
         if anomalies:
-            payload = [
-                {
+            payload = []
+            for comparison in anomalies:
+                historical = comparison.historical_context or {}
+                higher_history = historical.get("higher_price")
+                higher_history = (
+                    higher_history if isinstance(higher_history, dict) else {}
+                )
+                context_ready = int(higher_history.get("sample_count", 0)) >= 10
+                payload.append({
                     "id": comparison.anomaly_id,
                     "watch_id": watch_id,
                     "type": comparison.anomaly_type.value,
@@ -485,12 +578,19 @@ class SupabaseRestStore:
                     "higher_cabin_price": comparison.higher_offer.total_price,
                     "spread_amount": comparison.spread_amount,
                     "spread_pct": comparison.spread_pct,
+                    "historical_percentile": (
+                        higher_history.get("percentile") if context_ready else None
+                    ),
+                    "historical_median": (
+                        higher_history.get("median") if context_ready else None
+                    ),
+                    "historical_mad": (
+                        higher_history.get("mad") if context_ready else None
+                    ),
                     "confidence": "OBSERVED",
                     "resolved_at": None,
                     "explanation_json": comparison.explanation(),
-                }
-                for comparison in anomalies
-            ]
+                })
             rows = self._request(
                 "POST",
                 "/anomalies",
@@ -560,7 +660,11 @@ def _optional_date(value: str | None) -> date | None:
     return date.fromisoformat(value) if value else None
 
 
-def _offers_from_rows(rows: list[dict[str, Any]]) -> list[FareOffer]:
+def _offers_from_rows(
+    rows: list[dict[str, Any]],
+    *,
+    batch_by_run: dict[str, str | None] | None = None,
+) -> list[FareOffer]:
     """Convert quality-eligible rows from explicitly selected latest runs."""
     return [
         FareOffer(
@@ -585,6 +689,13 @@ def _offers_from_rows(rows: list[dict[str, Any]]) -> list[FareOffer]:
             booking_url=row["booking_url"],
             observed_at=datetime.fromisoformat(row["observed_at"]),
             raw_payload=None,
+            observation_id=row.get("id"),
+            search_run_id=row.get("search_run_id"),
+            acquisition_batch_id=(
+                batch_by_run.get(str(row.get("search_run_id")))
+                if batch_by_run is not None
+                else None
+            ),
         )
         for row in rows
     ]

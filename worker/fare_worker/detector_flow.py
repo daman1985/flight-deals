@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 
 from .detector import evaluate_cabin_spreads
 from .persistence import SupabaseRestStore
@@ -19,6 +20,24 @@ def analyze_watch(store: SupabaseRestStore, watch_id: str) -> tuple[int, int, in
     """Evaluate and persist the current comparable cabin relationships."""
     thresholds, offers = store.load_detection_input(watch_id)
     comparisons = evaluate_cabin_spreads(watch_id, offers, thresholds)
+    comparisons = [
+        replace(
+            comparison,
+            historical_context=store.load_historical_comparison_context(
+                watch_id,
+                comparison,
+            ),
+        )
+        if (
+            comparison.lower_offer.observation_id is not None
+            and comparison.higher_offer.observation_id is not None
+            and comparison.lower_offer.acquisition_batch_id is not None
+            and comparison.lower_offer.acquisition_batch_id
+            == comparison.higher_offer.acquisition_batch_id
+        )
+        else comparison
+        for comparison in comparisons
+    ]
     detected, resolved = store.persist_comparison_results(watch_id, comparisons)
     return len(comparisons), detected, resolved
 

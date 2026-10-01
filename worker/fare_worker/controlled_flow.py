@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from datetime import date, datetime, timezone
+from uuid import uuid4
 
 from .detector_flow import analyze_watch
 from .models import Cabin, FareSearchRequest
@@ -29,6 +30,7 @@ def main() -> None:
 
     store = SupabaseRestStore(supabase_url, secret_key)
     provider = FliProvider()
+    acquisition_batch_id = str(uuid4())
     try:
         store.ensure_exact_test_watch(
             watch_id=watch_id,
@@ -56,6 +58,7 @@ def main() -> None:
                 candidate_id=candidate_id,
                 response=response,
                 started_at=started_at,
+                acquisition_batch_id=acquisition_batch_id,
             )
             print(
                 f"{cabin.value}: {response.health.status.value}; "

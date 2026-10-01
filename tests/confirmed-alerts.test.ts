@@ -1,4 +1,3 @@
-/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 18: /bin/ps: Operation not permitted
 import { describe, expect, it } from "vitest";
 
 import { confirmedAnomalyView } from "@/lib/supabase/confirmed-alerts";
@@ -95,6 +94,45 @@ describe("confirmedAnomalyView", () => {
       confirmed_at: "2026-09-30T16:00:00Z",
       outbound_stop_bucket: null,
       lower_observation_id: null,
+    });
+  });
+
+  it("reads the historical evidence frozen inside the confirmation snapshot", () => {
+    const buildingMetric = {
+      sample_count: 4,
+      gate: "BUILDING",
+      median: null,
+      mad: null,
+      percentile: null,
+      robust_score: null,
+      first_sample_at: null,
+      last_sample_at: null,
+      classification_eligible: false,
+      historical_low: false,
+    };
+    const result = confirmedAnomalyView(baseAnomaly({
+      confirmation: {
+        confirmed_at: "2026-10-01T09:30:00Z",
+        historical_context: {
+          method: "fare-radar-history-v1",
+          scope: {
+            currency: "CAD",
+            passengers: 1,
+            outbound_stop_bucket: "ONE_STOP",
+            return_stop_bucket: "ONE_STOP",
+            lower_cabin: "ECONOMY",
+            higher_cabin: "BUSINESS",
+          },
+          lower_price: buildingMetric,
+          higher_price: buildingMetric,
+          spread_pct: buildingMetric,
+        },
+      },
+    }));
+
+    expect(result?.historical_context).toMatchObject({
+      method: "fare-radar-history-v1",
+      spreadPct: { sampleCount: 4, gate: "BUILDING" },
     });
   });
 });

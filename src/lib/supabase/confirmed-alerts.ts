@@ -1,7 +1,7 @@
-/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 18: /bin/ps: Operation not permitted
 import type { Database } from "@/lib/supabase/database.types";
 import type { createClient } from "@/lib/supabase/server";
 import type { ConfirmedAlertEntry } from "@/app/_components/confirmed-alert-ledger";
+import { historicalContextFromJson } from "@/domain/history";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 type AlertRow = Database["public"]["Tables"]["alerts"]["Row"];
@@ -39,6 +39,9 @@ function snapshotNumber(snapshot: Snapshot, key: string, fallback: number | null
 export function confirmedAnomalyView(anomaly: AnomalyAlertRow): ConfirmedAlertEntry["anomaly"] | null {
   const explanation = asRecord(anomaly.explanation_json);
   const snapshot = asRecord(explanation?.confirmation) ?? {};
+  const historicalContext = historicalContextFromJson(
+    snapshot.historical_context ?? explanation?.historical_context,
+  );
   const confirmedAt = snapshotString(snapshot, "confirmed_at", anomaly.confirmed_at) ?? anomaly.confirmed_at;
   if (!confirmedAt) return null;
 
@@ -65,6 +68,7 @@ export function confirmedAnomalyView(anomaly: AnomalyAlertRow): ConfirmedAlertEn
     higher_observation_id: snapshotString(snapshot, "higher_observation_id", null),
     lower_run_id: snapshotString(snapshot, "lower_run_id", null),
     higher_run_id: snapshotString(snapshot, "higher_run_id", null),
+    historical_context: historicalContext,
   };
 }
 

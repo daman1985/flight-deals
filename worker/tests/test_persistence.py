@@ -1,7 +1,7 @@
-/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 18: /bin/ps: Operation not permitted
 """Persistence invariants for keeping health separate from fares."""
 
 import json
+from dataclasses import replace
 from datetime import date, datetime, timezone
 
 import httpx
@@ -122,6 +122,30 @@ def test_rest_paths_stay_under_postgrest_base_url() -> None:
     assert observed_paths == ["/rest/v1/watches"]
 
 
+def test_active_watch_loader_includes_every_runtime_quality_constraint() -> None:
+    observed_request: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_request.append(request)
+        return httpx.Response(200, json=[])
+
+    store = SupabaseRestStore("https://example.supabase.co", "test-secret")
+    store._client.close()
+    store._client = httpx.Client(
+        base_url="https://example.supabase.co/rest/v1/",
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        assert store.load_active_watches() == []
+    finally:
+        store.close()
+
+    selected = observed_request[0].url.params["select"]
+    assert "passengers" in selected
+    assert "max_stops" in selected
+    assert "max_duration_minutes" in selected
+
+
 def test_claim_due_candidates_uses_worker_only_rpc() -> None:
     observed_requests: list[httpx.Request] = []
 
@@ -187,6 +211,168 @@ def test_anomaly_persistence_uses_idempotent_primary_key_upsert() -> None:
     assert observed_requests[0].url.path == "/rest/v1/anomalies"
     assert observed_requests[0].url.params["on_conflict"] == "id"
     assert "confirmed_at" not in json.loads(observed_requests[0].content)[0]
+
+
+def test_anomaly_persistence_carries_gated_historical_evidence() -> None:
+    comparison = evaluate_cabin_spreads(
+        WATCH_ID,
+        [
+            _detector_offer(Cabin.ECONOMY, 1000),
+            _detector_offer(Cabin.PREMIUM_ECONOMY, 1100),
+        ],
+        DetectionThresholds(pe_near_inversion_pct=15),
+    )[0]
+    comparison = replace(
+        comparison,
+        historical_context={
+            "method": "fare-radar-history-v1",
+            "higher_price": {
+                "sample_count": 30,
+                "median": 1400,
+                "mad": 100,
+                "percentile": 4.5,
+            },
+            "spread_pct": {
+                "sample_count": 30,
+                "gate": "ELIGIBLE",
+            },
+        },
+    )
+    observed_payload: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_payload.extend(json.loads(request.content))
+        return httpx.Response(200, json=[{"id": comparison.anomaly_id}])
+
+    store = SupabaseRestStore("https://example.supabase.co", "test-secret")
+    store._client.close()
+    store._client = httpx.Client(
+        base_url="https://example.supabase.co/rest/v1/",
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        store.persist_comparison_results(WATCH_ID, [comparison])
+    finally:
+        store.close()
+
+    persisted = observed_payload[0]
+    assert persisted["historical_percentile"] == 4.5
+    assert persisted["historical_median"] == 1400
+    assert persisted["historical_mad"] == 100
+    assert persisted["explanation_json"]["historical_context"]["method"] == (
+        "fare-radar-history-v1"
+    )
+
+
+def test_historical_context_requires_same_normal_acquisition_batch() -> None:
+    lower = _detector_offer(Cabin.ECONOMY, 1000).model_copy(
+        update={
+            "observation_id": "00000000-0000-4000-8000-000000000031",
+            "acquisition_batch_id": "00000000-0000-4000-8000-000000000041",
+        }
+    )
+    higher = _detector_offer(Cabin.PREMIUM_ECONOMY, 1100).model_copy(
+        update={
+            "observation_id": "00000000-0000-4000-8000-000000000032",
+            "acquisition_batch_id": "00000000-0000-4000-8000-000000000041",
+        }
+    )
+    comparison = evaluate_cabin_spreads(
+        WATCH_ID,
+        [lower, higher],
+        DetectionThresholds(pe_near_inversion_pct=15),
+    )[0]
+    observed_request: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_request.append(request)
+        return httpx.Response(
+            200,
+            json={"method": "fare-radar-history-v1", "spread_pct": {"sample_count": 0}},
+        )
+
+    store = SupabaseRestStore("https://example.supabase.co", "test-secret")
+    store._client.close()
+    store._client = httpx.Client(
+        base_url="https://example.supabase.co/rest/v1/",
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        context = store.load_historical_comparison_context(WATCH_ID, comparison)
+    finally:
+        store.close()
+
+    assert context is not None
+    assert observed_request[0].url.path.endswith(
+        "/rpc/get_historical_comparison_context"
+    )
+    assert json.loads(observed_request[0].content) == {
+        "p_watch_id": WATCH_ID,
+        "p_lower_observation_id": lower.observation_id,
+        "p_higher_observation_id": higher.observation_id,
+    }
+
+    mismatched = replace(
+        comparison,
+        higher_offer=higher.model_copy(
+            update={"acquisition_batch_id": "00000000-0000-4000-8000-000000000099"}
+        ),
+    )
+    assert store.load_historical_comparison_context(WATCH_ID, mismatched) is None
+
+
+def test_current_history_snapshot_is_saved_even_without_an_anomaly() -> None:
+    batch_id = "00000000-0000-4000-8000-000000000041"
+    lower = _detector_offer(Cabin.ECONOMY, 1000).model_copy(
+        update={
+            "observation_id": "00000000-0000-4000-8000-000000000031",
+            "acquisition_batch_id": batch_id,
+        }
+    )
+    higher = _detector_offer(Cabin.PREMIUM_ECONOMY, 1300).model_copy(
+        update={
+            "observation_id": "00000000-0000-4000-8000-000000000032",
+            "acquisition_batch_id": batch_id,
+        }
+    )
+    comparison = evaluate_cabin_spreads(
+        WATCH_ID,
+        [lower, higher],
+        DetectionThresholds(pe_near_inversion_pct=15),
+    )[0]
+    assert comparison.is_anomaly is False
+    comparison = replace(
+        comparison,
+        historical_context={
+            "method": "fare-radar-history-v1",
+            "scope": {"passengers": 1},
+            "spread_pct": {"sample_count": 9, "gate": "BUILDING"},
+        },
+    )
+    observed_requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_requests.append(request)
+        if request.url.path.endswith("/comparison_history_snapshots"):
+            return httpx.Response(204)
+        return httpx.Response(200, json=[])
+
+    store = SupabaseRestStore("https://example.supabase.co", "test-secret")
+    store._client.close()
+    store._client = httpx.Client(
+        base_url="https://example.supabase.co/rest/v1/",
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        assert store.persist_comparison_results(WATCH_ID, [comparison]) == (0, 0)
+    finally:
+        store.close()
+
+    snapshot = json.loads(observed_requests[0].content)[0]
+    assert observed_requests[0].url.path.endswith("/comparison_history_snapshots")
+    assert snapshot["id"] == comparison.anomaly_id
+    assert snapshot["acquisition_batch_id"] == batch_id
+    assert snapshot["historical_context"]["spread_pct"]["sample_count"] == 9
 
 
 def test_complete_non_anomalous_pair_resolves_existing_signal() -> None:
@@ -311,3 +497,58 @@ def test_reconfirmation_persistence_records_provenance_without_changing_schedule
     evidence = json.loads(observed_requests[1].content)[0]
     assert evidence["quality_eligible"] is True
     assert evidence["confirmed"] is False  # Atomic DB finalization sets this only after both cabins verify.
+
+
+def test_normal_persistence_records_acquisition_and_request_provenance() -> None:
+    observed_requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_requests.append(request)
+        if request.url.path.endswith("/search_runs"):
+            return httpx.Response(200, json=[{"id": "run-normal"}])
+        return httpx.Response(204)
+
+    offer = _detector_offer(Cabin.BUSINESS, 1800)
+    request = FareSearchRequest(
+        origin=offer.origin,
+        destination=offer.destination,
+        departure_date=offer.departure_date,
+        return_date=offer.return_date,
+        cabin=offer.cabin,
+        passengers=2,
+        max_stops=1,
+    )
+    response = FareSearchResponse(
+        request=request,
+        offers=[offer],
+        health=SearchHealth(
+            status=SearchStatus.VALID_RESULT,
+            result_count=1,
+            completeness=1,
+            latency_ms=1,
+        ),
+    )
+    store = SupabaseRestStore("https://example.supabase.co", "test-secret")
+    store._client.close()
+    store._client = httpx.Client(
+        base_url="https://example.supabase.co/rest/v1/",
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        store.persist_response(
+            watch_id=WATCH_ID,
+            candidate_id="candidate-id",
+            response=response,
+            started_at=offer.observed_at,
+            update_candidate=False,
+            acquisition_batch_id="00000000-0000-4000-8000-000000000041",
+            request_max_duration_minutes=480,
+        )
+    finally:
+        store.close()
+
+    run = json.loads(observed_requests[0].content)
+    assert run["acquisition_batch_id"] == "00000000-0000-4000-8000-000000000041"
+    assert run["request_passengers"] == 2
+    assert run["request_max_stops"] == 1
+    assert run["request_max_duration_minutes"] == 480
