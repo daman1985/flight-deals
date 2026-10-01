@@ -1,3 +1,4 @@
+/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 18: /bin/ps: Operation not permitted
 """Persistence invariants for keeping health separate from fares."""
 
 import json
@@ -185,6 +186,7 @@ def test_anomaly_persistence_uses_idempotent_primary_key_upsert() -> None:
     assert observed_requests[0].method == "POST"
     assert observed_requests[0].url.path == "/rest/v1/anomalies"
     assert observed_requests[0].url.params["on_conflict"] == "id"
+    assert "confirmed_at" not in json.loads(observed_requests[0].content)[0]
 
 
 def test_complete_non_anomalous_pair_resolves_existing_signal() -> None:
@@ -274,3 +276,38 @@ def test_detection_loader_does_not_reuse_an_older_valid_run() -> None:
     assert thresholds.pe_near_inversion_pct == 15
     assert offers == []
     assert observed_paths == ["/rest/v1/watches", "/rest/v1/search_runs"]
+
+
+def test_reconfirmation_persistence_records_provenance_without_changing_schedule() -> None:
+    observed_requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_requests.append(request)
+        if request.url.path.endswith("/search_runs"):
+            return httpx.Response(200, json=[{"id": "run-confirmation"}])
+        assert request.url.path.endswith("/fare_observations")
+        return httpx.Response(204)
+
+    store = SupabaseRestStore("https://example.supabase.co", "test-secret")
+    store._client.close()
+    store._client = httpx.Client(base_url="https://example.supabase.co/rest/v1/",
+        transport=httpx.MockTransport(handler))
+    offer = _detector_offer(Cabin.ECONOMY, 1000)
+    request = FareSearchRequest(origin=offer.origin, destination=offer.destination,
+        departure_date=offer.departure_date, return_date=offer.return_date, cabin=offer.cabin)
+    response = FareSearchResponse(request=request, offers=[offer], health=SearchHealth(
+        status=SearchStatus.VALID_RESULT, result_count=1, completeness=1, latency_ms=1))
+    try:
+        result = store.persist_response(watch_id=WATCH_ID, candidate_id="candidate-id",
+            response=response, started_at=offer.observed_at, update_candidate=False,
+            reconfirmation_anomaly_id="anomaly-id", reconfirmation_lease_token="lease-id")
+    finally:
+        store.close()
+    assert result == "run-confirmation"
+    assert len(observed_requests) == 2
+    run = json.loads(observed_requests[0].content)
+    assert run["reconfirmation_anomaly_id"] == "anomaly-id"
+    assert run["reconfirmation_lease_token"] == "lease-id"
+    evidence = json.loads(observed_requests[1].content)[0]
+    assert evidence["quality_eligible"] is True
+    assert evidence["confirmed"] is False  # Atomic DB finalization sets this only after both cabins verify.

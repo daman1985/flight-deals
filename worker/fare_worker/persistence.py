@@ -1,3 +1,4 @@
+/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 18: /bin/ps: Operation not permitted
 """Narrow Supabase REST persistence used by the controlled proof."""
 
 from __future__ import annotations
@@ -260,6 +261,9 @@ class SupabaseRestStore:
         started_at: datetime,
         lease_token: str | None = None,
         next_scan_at: datetime | None = None,
+        update_candidate: bool = True,
+        reconfirmation_anomaly_id: str | None = None,
+        reconfirmation_lease_token: str | None = None,
     ) -> str:
         """Store health for every attempt and fares only for valid responses."""
         health = response.health
@@ -278,6 +282,9 @@ class SupabaseRestStore:
             "error_message": health.provider_error_message,
             "latency_ms": health.latency_ms,
         }
+        if reconfirmation_anomaly_id is not None:
+            run_payload["reconfirmation_anomaly_id"] = reconfirmation_anomaly_id
+            run_payload["reconfirmation_lease_token"] = reconfirmation_lease_token
         runs = self._request(
             "POST",
             "/search_runs",
@@ -321,6 +328,8 @@ class SupabaseRestStore:
                 json=observations,
             )
 
+        if not update_candidate:
+            return run_id
         if lease_token is not None:
             completed = self._request(
                 "POST",
@@ -351,6 +360,38 @@ class SupabaseRestStore:
                 allow_scan_count_marker=True,
             )
         return run_id
+
+    def claim_reconfirmations(self, *, limit: int, lease_token: str) -> list[dict[str, Any]]:
+        """Lease durable jobs; database enforces delay, retries and idempotency."""
+        return self._request("POST", "/rpc/claim_anomaly_reconfirmations", json={
+            "p_limit": limit, "p_lease_token": lease_token,
+        })
+
+    def confirmation_candidate_id(self, watch_id: str, request: FareSearchRequest) -> str:
+        """Find an existing candidate without changing its normal scan schedule."""
+        rows = self._request("GET", "/search_candidates", params={
+            "watch_id": f"eq.{watch_id}", "origin": f"eq.{request.origin}",
+            "destination": f"eq.{request.destination}",
+            "departure_date": f"eq.{request.departure_date.isoformat()}",
+            "return_date": f"eq.{request.return_date.isoformat()}" if request.return_date else "is.null",
+            "cabin": f"eq.{request.cabin.value}", "active": "is.true",
+            "select": "id", "order": "id", "limit": "1",
+        })
+        if not rows:
+            raise RuntimeError("Confirmation candidate is no longer active")
+        return str(rows[0]["id"])
+
+    def finish_reconfirmation(
+        self, *, anomaly_id: str, lease_token: str,
+        lower_run_id: str | None = None, higher_run_id: str | None = None,
+        error_code: str | None = None,
+    ) -> str:
+        """Atomically verify stored evidence and publish one confirmed in-app alert."""
+        return self._request("POST", "/rpc/finish_anomaly_reconfirmation", json={
+            "p_anomaly_id": anomaly_id, "p_lease_token": lease_token,
+            "p_lower_run_id": lower_run_id, "p_higher_run_id": higher_run_id,
+            "p_error_code": error_code,
+        })
 
     def load_detection_input(
         self,
@@ -445,7 +486,6 @@ class SupabaseRestStore:
                     "spread_amount": comparison.spread_amount,
                     "spread_pct": comparison.spread_pct,
                     "confidence": "OBSERVED",
-                    "confirmed_at": None,
                     "resolved_at": None,
                     "explanation_json": comparison.explanation(),
                 }

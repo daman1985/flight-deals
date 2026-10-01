@@ -1,3 +1,4 @@
+/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 18: /bin/ps: Operation not permitted
 :root {
   --paper: #f2efe7;
   --paper-bright: #fbfaf6;
@@ -429,6 +430,27 @@ h1, h2, p, dl, dd { margin-top: 0; }
 .section-number { font-family: var(--font-serif), Georgia, serif; font-size: clamp(92px, 11vw, 170px); font-style: italic; font-weight: 350; letter-spacing: -.08em; line-height: .72; }
 .quiet-copy h2, .registry-empty h2 { max-width: 680px; margin: 0; font-family: var(--font-serif), Georgia, serif; font-size: clamp(38px, 4vw, 62px); font-weight: 430; letter-spacing: -.045em; line-height: .98; }
 .quiet-copy > p:last-child { max-width: 580px; margin: 28px 0 0; color: var(--ink-soft); font-size: 16px; line-height: 1.7; }
+.confirmed-feed .confirmed-feed-intro { max-width: 580px; margin: 20px 0 24px; color: var(--ink-soft); font-size: 15px; line-height: 1.65; }
+.confirmed-alert-list { display: grid; gap: 0; margin: 24px 0 0; padding: 0; border-top: 3px solid var(--ink); list-style: none; }
+.confirmed-alert-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px 28px; align-items: start; padding: 20px 0; border-bottom: 1px solid var(--rule); }
+.confirmed-alert-main { min-width: 0; }
+.confirmed-alert-route { margin: 0 0 7px; color: var(--signal); font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+.confirmed-alert-main h3 { margin: 0; font-family: var(--font-serif), Georgia, serif; font-size: 21px; font-weight: 520; line-height: 1.15; }
+.confirmed-alert-classification { margin: 8px 0 0; color: var(--ink); font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+.confirmed-alert-fares { margin: 8px 0 0; color: var(--ink-soft); font-size: 12px; line-height: 1.55; font-variant-numeric: tabular-nums; }
+.confirmed-alert-stops { margin: 5px 0 0; color: var(--ink-soft); font-size: 11px; line-height: 1.5; }
+.confirmed-alert-evidence { margin-top: 10px; color: var(--ink-soft); font-size: 10px; }
+.confirmed-alert-evidence summary { width: fit-content; min-height: 30px; align-content: center; color: var(--signal); cursor: pointer; font-weight: 700; letter-spacing: .02em; }
+.confirmed-alert-evidence p { max-width: 680px; margin: 4px 0 0; overflow-wrap: anywhere; font-family: var(--font-mono), monospace; line-height: 1.55; }
+.confirmed-alert-meta { display: grid; gap: 6px; justify-items: end; color: var(--ink-soft); font-size: 10px; line-height: 1.45; text-align: right; }
+.confirmed-alert-meta a { min-height: 32px; align-content: center; color: var(--signal); font-size: 11px; font-weight: 700; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.confirmed-alert-empty { margin: 0; padding: 20px 0; border-top: 3px solid var(--ink); color: var(--ink-soft); font-size: 13px; line-height: 1.6; }
+.watch-confirmed-alerts { padding: 34px 0 38px; border-bottom: 1px solid var(--ink); }
+.watch-confirmed-alerts-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; }
+.watch-confirmed-alerts-heading h2 { margin: 0; font-family: var(--font-serif), Georgia, serif; font-size: clamp(27px, 2.7vw, 35px); font-weight: 500; letter-spacing: -.025em; }
+.watch-confirmed-alerts .confirmed-alert-list { margin-top: 22px; }
+.watch-confirmed-alerts .confirmed-alert-row { grid-template-columns: minmax(0, 1fr) minmax(185px, auto); }
+.watch-confirmed-alerts .confirmed-alert-empty { margin-top: 20px; }
 .reading-key { align-self: end; border-top: 4px solid var(--ink); padding-top: 15px; }
 .reading-key ol { margin: 0 0 22px; padding: 0; list-style: none; }
 .reading-key li { display: grid; grid-template-columns: 34px 1fr; padding: 11px 0; border-bottom: 1px solid var(--rule); }
@@ -663,6 +685,10 @@ h1, h2, p, dl, dd { margin-top: 0; }
   .briefing-ledger div:nth-child(2) { border-right: 0; }
   .briefing-ledger div:nth-child(-n+2) { border-bottom: 1px solid var(--rule); }
   .quiet-feed, .registry-empty { grid-template-columns: 1fr; gap: 34px; padding-top: 72px; }
+  .confirmed-feed { gap: 26px; }
+  .confirmed-alert-row, .watch-confirmed-alerts .confirmed-alert-row { grid-template-columns: 1fr; gap: 10px; }
+  .confirmed-alert-meta { justify-items: start; text-align: left; }
+  .watch-confirmed-alerts-heading { align-items: flex-start; flex-direction: column; }
   .section-number { font-size: 86px; }
   .reading-key { grid-column: auto; }
   .registry-header { grid-template-columns: 1fr; min-height: 0; gap: 48px; }

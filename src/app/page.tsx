@@ -1,18 +1,30 @@
+/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 18: /bin/ps: Operation not permitted
 import type { Metadata } from "next";
 
 import Link from "next/link";
 
+import { ConfirmedAlertLedger } from "@/app/_components/confirmed-alert-ledger";
 import { createClient } from "@/lib/supabase/server";
+import { getConfirmedInAppAlerts } from "@/lib/supabase/confirmed-alerts";
 
 export const metadata: Metadata = { title: "Briefing" };
 
 export default async function DealFeedPage() {
   const supabase = await createClient();
-  const { count } = await supabase
-    .from("watches")
-    .select("id", { count: "exact", head: true })
-    .eq("active", true);
-  const liveWatchCount = count ?? 0;
+  const [watchCountResult, confirmedAlertResult] = await Promise.all([
+    supabase
+      .from("watches")
+      .select("id", { count: "exact", head: true })
+      .eq("active", true),
+    getConfirmedInAppAlerts(supabase, { limit: 12 }),
+  ]);
+  const liveWatchCount = watchCountResult.count ?? 0;
+  const confirmedAlerts = confirmedAlertResult.entries;
+  const alertCountLabel = confirmedAlertResult.error
+    ? "—"
+    : confirmedAlerts.length === 12
+      ? "12+"
+      : String(confirmedAlerts.length).padStart(2, "0");
 
   return (
     <div className="page-frame briefing-page">
@@ -61,21 +73,26 @@ export default async function DealFeedPage() {
 
       <dl className="briefing-ledger" aria-label="Monitoring summary">
         <div><dt>Live watches</dt><dd>{String(liveWatchCount).padStart(2, "0")}</dd></div>
-        <div><dt>Verified signals</dt><dd>00</dd></div>
+        <div><dt>Recent alerts shown</dt><dd>{alertCountLabel}</dd></div>
         <div><dt>Provider state</dt><dd>Proven</dd></div>
         <div><dt>Scheduling</dt><dd>Pending</dd></div>
       </dl>
 
-      <section className="quiet-feed" aria-labelledby="quiet-heading">
-        <div className="section-number" aria-hidden="true">00</div>
+      <section className="quiet-feed confirmed-feed" aria-labelledby="confirmed-heading">
+        <div className="section-number" aria-hidden="true">{alertCountLabel}</div>
         <div className="quiet-copy">
-          <p className="eyebrow">Signal ledger</p>
-          <h2 id="quiet-heading">Nothing has earned the front page yet.</h2>
-          <p>
-            That is the honest state: live acquisition works, while unattended scheduling
-            and alerts are still being connected. Every watch keeps freshness, missing fares,
-            and search health visible instead of implying certainty the data cannot support.
+          <p className="eyebrow">Confirmed signal ledger</p>
+          <h2 id="confirmed-heading">Confirmed fare relationships.</h2>
+          <p className="confirmed-feed-intro">
+            Only in-app alerts whose fare relationship has been reconfirmed appear here. Each
+            entry keeps its route, travel dates, cabin prices, and confirmation time together.
           </p>
+          <ConfirmedAlertLedger
+            alerts={confirmedAlerts}
+            emptyMessage={confirmedAlertResult.error
+              ? "Confirmed in-app alerts could not be loaded right now."
+              : "No confirmed in-app alerts yet. A signal appears here only after a fare relationship is reconfirmed."}
+          />
         </div>
         <div className="reading-key" aria-label="How to read a future signal">
           <p className="eyebrow">Reading key</p>

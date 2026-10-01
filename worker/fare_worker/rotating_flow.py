@@ -1,3 +1,4 @@
+/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 18: /bin/ps: Operation not permitted
 """Plan and process one bounded rotation of due fare searches."""
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from .models import FareSearchRequest, SearchStatus
 from .persistence import SupabaseRestStore
 from .planner import active_departure_window, plan_candidate_batch
 from .providers import FliProvider
+from .reconfirmation import run_reconfirmation_batch
 
 
 def _required_env(name: str) -> str:
@@ -164,9 +166,14 @@ def main() -> None:
         _required_env("SUPABASE_SECRET_KEY"),
     )
     try:
+        provider = FliProvider()
+        # Retry already queued signals before regular scans; newly detected
+        # signals wait for a later rotation and their persisted not-before time.
+        checked, confirmed = run_reconfirmation_batch(store, provider, limit=1)
+        print(f"reconfirmation: checked={checked}; confirmed={confirmed}")
         planned, scanned, analyzed = run_rotation(
             store,
-            FliProvider(),
+            provider,
             as_of=datetime.now(timezone.utc).date(),
             planning_limit_per_watch=_positive_int_env(
                 "FARE_PLANNING_LIMIT_PER_WATCH",

@@ -1,10 +1,13 @@
+/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 18: /bin/ps: Operation not permitted
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { RelativeTime } from "@/app/_components/relative-time";
+import { ConfirmedAlertLedger } from "@/app/_components/confirmed-alert-ledger";
 import { calculateCabinSpread } from "@/domain/spread";
 import { evidenceFreshness, scanIsOverdue } from "@/domain/trust";
+import { getConfirmedInAppAlerts } from "@/lib/supabase/confirmed-alerts";
 import type { Database } from "@/lib/supabase/database.types";
 import { createClient } from "@/lib/supabase/server";
 
@@ -256,7 +259,7 @@ export default async function LiveWatchPage({ params }: { params: Promise<{ id: 
 
   if (watchError || !watchData) notFound();
   const watch = watchData as Watch;
-  const [candidateResult, runResult, observationResult, anomalyResult] = await Promise.all([
+  const [candidateResult, runResult, observationResult, anomalyResult, confirmedAlertResult] = await Promise.all([
     supabase
       .from("search_candidates")
       .select("*")
@@ -284,6 +287,7 @@ export default async function LiveWatchPage({ params }: { params: Promise<{ id: 
       .is("resolved_at", null)
       .order("first_detected_at", { ascending: false })
       .limit(100),
+    getConfirmedInAppAlerts(supabase, { watchId: id, limit: 8 }),
   ]);
 
   const candidates = (candidateResult.data ?? []) as Candidate[];
@@ -425,6 +429,23 @@ export default async function LiveWatchPage({ params }: { params: Promise<{ id: 
           <div><dt>Fare availability</dt><dd>{fares.size} of {watch.cabins.length} cabins found</dd></div>
           <div><dt>Next scan</dt><dd>{overdue ? "Overdue" : nextScan ? timestampFormatter.format(new Date(nextScan)) : "Not scheduled"}</dd></div>
         </dl>
+      </section>
+
+      <section className="watch-confirmed-alerts" aria-labelledby="watch-alert-heading">
+        <div className="watch-confirmed-alerts-heading">
+          <div>
+            <p className="eyebrow">Reconfirmed signals</p>
+            <h2 id="watch-alert-heading">In-app alerts for this watch.</h2>
+          </div>
+          <Link className="text-link" href="/">Briefing ledger →</Link>
+        </div>
+        <ConfirmedAlertLedger
+          alerts={confirmedAlertResult.entries}
+          emptyMessage={confirmedAlertResult.error
+            ? "Confirmed in-app alerts could not be loaded right now."
+            : "No confirmed in-app alerts for this watch yet. Alerts appear only after a relationship is reconfirmed."}
+          showWatchLink={false}
+        />
       </section>
 
       <section className="cabin-snapshot" aria-labelledby="live-cabin-heading">
