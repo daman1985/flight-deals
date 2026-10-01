@@ -18,6 +18,7 @@ This repository covers Milestone 0 through the bounded Milestone 4 rotation loop
 - authenticated Exact, Window, and Anytime watch creation
 - cursor-based candidate generation and priority bands
 - atomic, lease-backed due-work claims for low-concurrency workers
+- a 15-minute GitHub Actions rotation with manual dispatch
 - a live watch dossier backed by RLS-protected Supabase evidence
 
 Historical anomaly modeling, alerts, booking, AI features, and additional providers are out of scope.
@@ -80,4 +81,13 @@ source .venv/bin/activate
 PYTHONPATH=worker python -m fare_worker.rotating_flow
 ```
 
-Recurring execution is intentionally not enabled until the isolated worker has a chosen deployment target and its server-only secrets are configured there.
+Recurring execution is defined in `.github/workflows/fare-worker-rotation.yml` and starts
+after that workflow reaches the repository's default branch with these GitHub Actions
+secrets configured:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `SUPABASE_SECRET_KEY`
+- `FLI_SOCS_COOKIE` (optional)
+
+The workflow also supports manual dispatch. Each invocation plans a bounded batch, claims
+due candidates with leases, scans sequentially, and records detector output.

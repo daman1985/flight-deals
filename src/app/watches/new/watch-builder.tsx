@@ -420,8 +420,8 @@ export function WatchBuilder() {
         <div>
           <p className="eyebrow">Ready to monitor</p>
           <p>
-            Saving creates the watch and its search candidates. Until unattended scheduling
-            is deployed, new scans run only when the worker is started.
+            Saving creates the watch. Its search candidates and first fare evidence appear
+            when the next worker rotation completes.
           </p>
           <p className="builder-submit-error" aria-live="polite">
             {state.message || "\u00a0"}

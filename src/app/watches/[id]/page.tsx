@@ -89,10 +89,18 @@ function dateScope(watch: Watch) {
   };
 }
 
-function latestCycleByCandidate(runs: SearchRun[]) {
+function scopeKey(candidate: Pick<Candidate, "origin" | "destination" | "departure_date" | "return_date">) {
+  return [candidate.origin, candidate.destination, candidate.departure_date, candidate.return_date ?? ""].join("|");
+}
+
+function latestCycleByCandidate(runs: SearchRun[], candidateById: Map<string, Candidate>) {
   const latest = runs[0];
   const cycle = new Map<string, SearchRun>();
   if (!latest) return cycle;
+
+  const latestCandidate = candidateById.get(latest.candidate_id);
+  if (!latestCandidate) return cycle;
+  const latestScopeKey = scopeKey(latestCandidate);
 
   const latestFinishedAt = Date.parse(latest.finished_at);
   const cycleWindowMs = 10 * 60_000;
@@ -100,6 +108,8 @@ function latestCycleByCandidate(runs: SearchRun[]) {
   for (const run of runs) {
     const ageFromLatest = latestFinishedAt - Date.parse(run.finished_at);
     if (ageFromLatest > cycleWindowMs) break;
+    const candidate = candidateById.get(run.candidate_id);
+    if (!candidate || scopeKey(candidate) !== latestScopeKey) continue;
     if (!cycle.has(run.candidate_id)) cycle.set(run.candidate_id, run);
   }
 
@@ -192,7 +202,7 @@ function signalSummary({
 
   if (!scanComplete) {
     return {
-      detail: "Not every planned cabin search completed in the latest cycle, so no complete relationship conclusion is shown.",
+      detail: "Not every cabin search for this exact route and date pair completed in the latest cycle, so no complete relationship conclusion is shown.",
       label: "Trust state",
       metric: "Partial",
       title: "The latest scan is incomplete.",
@@ -273,39 +283,62 @@ export default async function LiveWatchPage({ params }: { params: Promise<{ id: 
       .eq("watch_id", id)
       .is("resolved_at", null)
       .order("first_detected_at", { ascending: false })
-      .limit(1),
+      .limit(100),
   ]);
 
   const candidates = (candidateResult.data ?? []) as Candidate[];
   const runs = (runResult.data ?? []) as SearchRun[];
   const observations = (observationResult.data ?? []) as Observation[];
   const anomalies = (anomalyResult.data ?? []) as Anomaly[];
-  const candidateByCabin = new Map(candidates.map((candidate) => [candidate.cabin, candidate]));
   const candidateById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
-  const cycleRuns = latestCycleByCandidate(runs);
+  const currentRuns = runs.filter((run) => candidateById.has(run.candidate_id));
+  const latestCandidate = currentRuns[0]
+    ? candidateById.get(currentRuns[0].candidate_id)
+    : undefined;
+  const currentScopeKey = latestCandidate ? scopeKey(latestCandidate) : null;
+  const scopeCandidates = currentScopeKey
+    ? candidates.filter((candidate) => scopeKey(candidate) === currentScopeKey)
+    : [];
+  const candidateByCabin = new Map(scopeCandidates.map((candidate) => [candidate.cabin, candidate]));
+  const cycleRuns = latestCycleByCandidate(currentRuns, candidateById);
   const currentValidRunIds = new Set(
     [...cycleRuns.values()]
       .filter((run) => run.status === "VALID_RESULT")
       .map((run) => run.id),
   );
   const fares = lowestByCabin(observations, currentValidRunIds);
-  const latestScan = runs[0]?.finished_at ?? null;
+  const latestScan = currentRuns[0]?.finished_at ?? null;
   const freshness = evidenceFreshness(latestScan);
   const scope = dateScope(watch);
+  const currentScopeLabel = latestCandidate
+    ? `${latestCandidate.origin} → ${latestCandidate.destination} · ${formatDate(latestCandidate.departure_date)}${latestCandidate.return_date ? ` – ${formatDate(latestCandidate.return_date)}` : ""}`
+    : null;
   const nextScan = candidates
     .map((candidate) => candidate.next_scan_at)
     .filter((value): value is string => Boolean(value))
     .sort()[0] ?? null;
   const checkedCount = cycleRuns.size;
-  const scanComplete = candidates.length > 0 && checkedCount / candidates.length >= 0.9;
+  const expectedCabinSearches = watch.cabins.length;
+  const scanComplete =
+    expectedCabinSearches > 0 &&
+    scopeCandidates.length === expectedCabinSearches &&
+    checkedCount / expectedCabinSearches >= 0.9;
   const failedCount = [...cycleRuns.values()].filter((run) => failureStatuses.has(run.status)).length;
   const missingCabins = watch.cabins.filter((cabin) => !fares.has(cabin));
+  const currentAnomaly = latestCandidate
+    ? anomalies.find((anomaly) =>
+        anomaly.origin === latestCandidate.origin &&
+        anomaly.destination === latestCandidate.destination &&
+        anomaly.departure_date === latestCandidate.departure_date &&
+        anomaly.return_date === latestCandidate.return_date,
+      )
+    : undefined;
   const overdue = scanIsOverdue(nextScan);
   const dataReadFailed = Boolean(
     candidateResult.error || runResult.error || observationResult.error || anomalyResult.error,
   );
   const signal = signalSummary({
-    anomaly: anomalies[0],
+    anomaly: currentAnomaly,
     dataReadFailed,
     fareCount: fares.size,
     freshnessState: freshness.state,
@@ -388,7 +421,7 @@ export default async function LiveWatchPage({ params }: { params: Promise<{ id: 
               ) : freshness.label}
             </dd>
           </div>
-          <div><dt>Scan completion</dt><dd>{checkedCount} of {candidates.length || watch.cabins.length} cabins checked</dd></div>
+          <div><dt>Scan completion</dt><dd>{checkedCount} of {expectedCabinSearches} cabin searches checked</dd></div>
           <div><dt>Fare availability</dt><dd>{fares.size} of {watch.cabins.length} cabins found</dd></div>
           <div><dt>Next scan</dt><dd>{overdue ? "Overdue" : nextScan ? timestampFormatter.format(new Date(nextScan)) : "Not scheduled"}</dd></div>
         </dl>
@@ -400,7 +433,9 @@ export default async function LiveWatchPage({ params }: { params: Promise<{ id: 
             <p className="eyebrow">Cabin comparison</p>
             <h2 id="live-cabin-heading">Current fares and their relationship.</h2>
           </div>
-          <p className="section-scope">Same route · same dates · CAD round trip</p>
+          <p className="section-scope">
+            {currentScopeLabel ? `${currentScopeLabel} · CAD round trip` : "Awaiting first route and date scope"}
+          </p>
         </div>
         <ol className="cabin-overview" aria-label="Current fares by cabin">
           {cabinOrder.filter((cabin) => watch.cabins.includes(cabin)).map((cabin) => {
@@ -440,7 +475,7 @@ export default async function LiveWatchPage({ params }: { params: Promise<{ id: 
           <h2 id="health-heading">What the latest cycle actually checked.</h2>
         </div>
         <dl>
-          <div><dt>Search completion</dt><dd>{checkedCount} of {candidates.length || watch.cabins.length}</dd></div>
+          <div><dt>Search completion</dt><dd>{checkedCount} of {expectedCabinSearches} cabin searches</dd></div>
           <div><dt>Provider responses</dt><dd>{[...cycleRuns.values()].filter((run) => successfulStatuses.has(run.status)).length} successful · {failedCount} failed</dd></div>
           <div><dt>Schedule</dt><dd>{overdue ? "Next scan overdue" : nextScan ? `Due ${timestampFormatter.format(new Date(nextScan))}` : "Not scheduled"}</dd></div>
         </dl>
