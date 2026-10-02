@@ -19,8 +19,9 @@ export function SpreadStrip({ current, median, p25, p75, label }: SpreadStripPro
 
   return (
     <figure className="spread-figure">
-      <figcaption>{label}</figcaption>
+      <figcaption><span>Relationship measured</span>{label}</figcaption>
       <div className="spread-track" role="img" aria-label={description}>
+        <span className="spread-grid" aria-hidden="true" />
         <span className="spread-zero" style={{ left: `${position(0)}%` }} />
         <span
           className="spread-band"
@@ -35,8 +36,18 @@ export function SpreadStrip({ current, median, p25, p75, label }: SpreadStripPro
       <div className="spread-labels" aria-hidden="true">
         <span>Same price</span>
         <span>Typical {median.toFixed(0)}%</span>
-        <strong>Fixture today +{current.toFixed(1)}%</strong>
+        <strong>Fixture +{current.toFixed(1)}%</strong>
       </div>
+      <table className="sr-only">
+        <caption>{label}</caption>
+        <thead><tr><th>Measure</th><th>Percentage</th></tr></thead>
+        <tbody>
+          <tr><td>Fixture premium</td><td>{current.toFixed(1)}%</td></tr>
+          <tr><td>Illustrative median</td><td>{median.toFixed(0)}%</td></tr>
+          <tr><td>Illustrative lower quartile</td><td>{p25.toFixed(0)}%</td></tr>
+          <tr><td>Illustrative upper quartile</td><td>{p75.toFixed(0)}%</td></tr>
+        </tbody>
+      </table>
     </figure>
   );
 }

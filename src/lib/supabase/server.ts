@@ -22,8 +22,8 @@ export async function createClient() {
               cookieStore.set(name, value, options);
             });
           } catch {
-            // Server Components cannot always write cookies. Session refresh
-            // belongs in a future proxy/auth boundary, not this foundation.
+            // Server Components cannot write cookies. The proxy refreshes the
+            // session before protected pages render.
           }
         },
       },

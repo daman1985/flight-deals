@@ -1,0 +1,5 @@
+create index comparison_history_lower_observation_idx
+  on public.comparison_history_snapshots(lower_observation_id);
+
+create index comparison_history_higher_observation_idx
+  on public.comparison_history_snapshots(higher_observation_id);

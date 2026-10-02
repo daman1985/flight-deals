@@ -4,7 +4,8 @@ A private airfare monitor for detecting unusual relationships between Economy, P
 
 ## Current scope
 
-This repository covers Milestone 0 and the minimum technical foundation for Milestone 1:
+This repository covers the foundation through unattended rotation, reconfirmed alerts,
+and the first historical-intelligence layer:
 
 - Next.js application foundation
 - provider-neutral fare/search contracts
@@ -14,8 +15,18 @@ This repository covers Milestone 0 and the minimum technical foundation for Mile
 - deterministic spread calculations
 - fixture-based tests with no live Google dependency
 - a controlled YVR → SNA cross-cabin proof script
+- deterministic cabin-inversion and near-inversion detection
+- authenticated Exact, Window, and Anytime watch creation
+- cursor-based candidate generation and priority bands
+- atomic, lease-backed due-work claims for low-concurrency workers
+- a 15-minute GitHub Actions rotation with manual dispatch
+- a live watch dossier backed by RLS-protected Supabase evidence
+- durable delayed anomaly reconfirmation with lease recovery and deduplicated in-app alerts
+- explicit acquisition-batch, passenger, stop, and duration provenance for every normal scan
+- exact-scope median, MAD, empirical percentile, and sample-readiness evidence
+- RLS-protected historical comparison snapshots on each live watch and confirmed alert
 
-Historical anomaly modeling, broad date scanning, alerts, booking, AI features, and additional providers are out of scope.
+Booking, email delivery, contextual AI, and additional fare providers remain future work.
 
 ## Repository layout
 
@@ -36,6 +47,7 @@ Copy `.env.example` to `.env.local` for local development and fill values throug
 - Worker/provider: `FLI_SOCS_COOKIE`, `FLI_CA_BUNDLE`
 - Controlled proof: `TEST_USER_ID`, `TEST_WATCH_ID`, `TEST_DEPARTURE_DATE`, `TEST_RETURN_DATE`
 - Scheduler: `CRON_SECRET`
+- Rotation bounds: `FARE_PLANNING_LIMIT_PER_WATCH`, `FARE_SCAN_BATCH_SIZE`
 
 The Supabase secret key, worker secret, and cron secret must never use a `NEXT_PUBLIC_` prefix.
 
@@ -51,7 +63,7 @@ For the Python worker:
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install -e './worker[dev]'
+python -m pip install './worker[dev]'
 python -m pytest worker/tests
 ```
 
@@ -66,3 +78,21 @@ python -m pytest worker/tests
 ```
 
 Normal verification is fully offline after dependencies are installed. The controlled live acquisition flow is opt-in and documented in `docs/ARCHITECTURE.md`.
+
+One bounded live rotation can be run manually with:
+
+```bash
+source .venv/bin/activate
+PYTHONPATH=worker python -m fare_worker.rotating_flow
+```
+
+Recurring execution is defined in `.github/workflows/fare-worker-rotation.yml` and starts
+after that workflow reaches the repository's default branch with these GitHub Actions
+secrets configured:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `SUPABASE_SECRET_KEY`
+- `FLI_SOCS_COOKIE` (optional)
+
+The workflow also supports manual dispatch. Each invocation plans a bounded batch, claims
+due candidates with leases, scans sequentially, and records detector output.

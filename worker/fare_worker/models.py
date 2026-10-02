@@ -92,6 +92,9 @@ class FareOffer(BaseModel):
     booking_url: str | None = None
     observed_at: datetime
     raw_payload: dict[str, Any] | list[Any] | None = None
+    observation_id: str | None = None
+    search_run_id: str | None = None
+    acquisition_batch_id: str | None = None
 
 
 class SearchHealth(BaseModel):
