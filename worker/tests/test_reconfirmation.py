@@ -1,4 +1,3 @@
-/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 18: /bin/ps: Operation not permitted
 """Offline reconfirmation checks: exact scope, independent attempts and no false alerts."""
 
 from datetime import date, datetime, timezone

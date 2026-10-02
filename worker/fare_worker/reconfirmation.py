@@ -1,4 +1,3 @@
-/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 18: /bin/ps: Operation not permitted
 """Bounded, durable re-search before publishing any in-app fare alert."""
 
 from __future__ import annotations

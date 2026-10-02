@@ -1,4 +1,3 @@
-/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 18: /bin/ps: Operation not permitted
 create table public.anomaly_reconfirmations (
   anomaly_id uuid primary key references public.anomalies(id) on delete cascade,
   anomaly_snapshot jsonb not null,
